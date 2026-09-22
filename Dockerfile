@@ -18,8 +18,9 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 # Install Python dependencies
-# Don't upgrade setuptools (breaks PyYAML 6.0 source build); only upgrade pip & wheel
-RUN pip install --upgrade pip wheel && \
+# Install setuptools 60.0.0 first (compatible with PyYAML 6.0 source build)
+# Older setuptools needed because PyYAML 6.0 incompatible with setuptools >= 61.0.0
+RUN pip install --upgrade pip wheel setuptools==60.0.0 && \
     pip install -r requirements.txt
 
 
