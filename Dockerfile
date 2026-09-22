@@ -1,7 +1,7 @@
 # Multi-stage build for Market Data Service
 
 # Stage 1: Builder
-FROM python:3.12-slim as builder
+FROM python:3.11-slim as builder
 
 WORKDIR /app
 
@@ -18,14 +18,12 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 # Install Python dependencies
-# Install setuptools 60.0.0 first (compatible with PyYAML 6.0 source build)
-# Older setuptools needed because PyYAML 6.0 incompatible with setuptools >= 61.0.0
-RUN pip install --upgrade pip wheel setuptools==60.0.0 && \
+RUN pip install --upgrade pip wheel && \
     pip install -r requirements.txt
 
 
 # Stage 2: Runtime
-FROM python:3.12-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 
