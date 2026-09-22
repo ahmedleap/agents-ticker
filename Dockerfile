@@ -18,8 +18,9 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 # Install Python dependencies
+# Use --prefer-binary to avoid building PyYAML from source on Linux (incompatible with setuptools)
 RUN pip install --upgrade pip setuptools wheel && \
-    pip install -r requirements.txt
+    pip install --prefer-binary -r requirements.txt
 
 
 # Stage 2: Runtime
