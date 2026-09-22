@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  ticker-service:
+    build: .
+    container_name: ticker-service
+    ports:
+      - "8000:8000"
+    environment:
+      # Database Configuration (update with your actual values)
+      DB_HOST: ${DB_HOST}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+
+      # Alpaca API Configuration
+      ALPACA_API_KEY: ${ALPACA_API_KEY}
+      ALPACA_SECRET_KEY: ${ALPACA_SECRET_KEY}
+
+      # Service Configuration
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS:-10}
+      TRACKED_SYMBOLS: ${TRACKED_SYMBOLS:-AAPL,MSFT,GOOGL,AMZN,TSLA,SPY,QQQ,BND,JNJ,JPM}
+    
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
