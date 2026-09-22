@@ -1,14 +1,14 @@
 # Multi-stage build for Market Data Service
 
 # Stage 1: Builder
-FROM python:3.11-slim as builder
+FROM python:3.12-slim as builder
 
 WORKDIR /app
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    python3.11-dev \
+    python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements
@@ -24,7 +24,7 @@ RUN pip install --upgrade pip wheel && \
 
 
 # Stage 2: Runtime
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
