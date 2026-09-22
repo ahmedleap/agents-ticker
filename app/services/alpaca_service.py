@@ -130,16 +130,18 @@ class AlpacaService:
 
     def health_check(self) -> bool:
         """
-        Check if Alpaca API is accessible.
+        Check if Alpaca API is accessible by fetching a quote.
         
         Returns:
             True if API is accessible, False otherwise
         """
         try:
             logger.debug("Checking Alpaca API health")
+            # Use the same endpoint as the service (data API, not trading API)
             response = requests.get(
-                f"{self.data_url}/v1/account",
+                f"{self.data_url}/v2/stocks/quotes/latest",
                 headers=self.headers,
+                params={"symbols": "AAPL"},
                 timeout=5,
             )
             

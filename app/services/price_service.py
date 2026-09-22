@@ -146,6 +146,15 @@ class PriceService:
                     logger.warning(f"Missing bid/ask for {symbol}: bid={bid}, ask={ask}")
                     continue
                 
+                # Validate bid/ask prices
+                if ask <= 0 or bid <= 0:
+                    logger.warning(f"Invalid prices for {symbol}: bid={bid}, ask={ask} (must be > 0)")
+                    continue
+                
+                if ask < bid:
+                    logger.warning(f"Invalid prices for {symbol}: ask={ask} < bid={bid}")
+                    continue
+                
                 # Parse timestamp
                 try:
                     if isinstance(timestamp_str, str):
