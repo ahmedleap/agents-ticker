@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     ALPACA_SECRET_KEY: str = os.getenv("ALPACA_SECRET_KEY", "")
     ALPACA_BASE_URL: str = "https://paper-api.alpaca.markets"
     ALPACA_DATA_URL: str = "https://data.alpaca.markets"
+    # Feed selection - IMPORTANT: Different feeds have different data coverage
+    # - iex: Free but limited. Returns ap=0 (no ask price) for many stocks like AMZN, BND
+    # - delayed_sip: 15-min delayed but full data coverage. Returns real ask prices.
+    # - sip: Real-time all exchanges, requires paid unlimited subscription
+    # See: https://docs.alpaca.markets/us/reference/stocklatestquotes-1#query-params-feed
+    ALPACA_FEED: str = os.getenv("ALPACA_FEED", "delayed_sip")
 
     # Polling Configuration
     POLL_INTERVAL_SECONDS: int = 10

@@ -26,6 +26,7 @@ class AlpacaService:
         self.api_key = settings.ALPACA_API_KEY
         self.secret_key = settings.ALPACA_SECRET_KEY
         self.data_url = settings.ALPACA_DATA_URL
+        self.feed = settings.ALPACA_FEED
         self.timeout = settings.REQUEST_TIMEOUT_SECONDS
         self.headers = {
             "APCA-API-KEY-ID": self.api_key,
@@ -111,6 +112,7 @@ class AlpacaService:
             
             params = {
                 "symbols": symbols_str,
+                "feed": self.feed,
             }
             
             response = self._make_request("/v2/stocks/quotes/latest", params=params)
@@ -141,7 +143,7 @@ class AlpacaService:
             response = requests.get(
                 f"{self.data_url}/v2/stocks/quotes/latest",
                 headers=self.headers,
-                params={"symbols": "AAPL"},
+                params={"symbols": "AAPL", "feed": self.feed},
                 timeout=5,
             )
             
