@@ -2,8 +2,8 @@
 import logging
 from datetime import datetime, time
 from typing import Optional, List
+import pytz
 from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.job import Job
 
@@ -15,6 +15,28 @@ from app.database import db_manager
 from app.models import Instrument
 
 logger = logging.getLogger(__name__)
+
+
+def is_market_open() -> bool:
+    """
+    Check if US stock market is currently open.
+    Market hours: 9:30 AM - 4:00 PM ET, Monday-Friday.
+    
+    Returns:
+        True if market is open, False otherwise
+    """
+    et = pytz.timezone('America/New_York')
+    now = datetime.now(et)
+    
+    # Market closed on weekends (5 = Saturday, 6 = Sunday)
+    if now.weekday() >= 5:
+        return False
+    
+    # Market hours: 9:30 AM - 4:00 PM ET
+    market_open_time = time(9, 30)
+    market_close_time = time(16, 0)
+    
+    return market_open_time <= now.time() < market_close_time
 
 
 class SchedulerManager:
@@ -41,35 +63,45 @@ class SchedulerManager:
             
             self.scheduler = BackgroundScheduler()
             
-            # Job 1: Real-time quote fetching every 10 seconds
-            # Uses threading to batch all symbols into requests of ~100 each
+            # Job 1: Real-time quote fetching every 10 seconds (aligned to clock seconds)
+            # Runs only during market hours (9:30 AM - 4:00 PM ET, Mon-Fri)
+            # Uses CronTrigger with second='0,10,20,30,40,50' for perfect alignment
             self.poll_job = self.scheduler.add_job(
                 func=self._poll_market_data_threaded,
-                trigger=IntervalTrigger(seconds=settings.POLL_INTERVAL_SECONDS),
+                trigger=CronTrigger(
+                    second='0,10,20,30,40,50',
+                    timezone='America/New_York'
+                ),
                 id="market_data_poll_job1",
-                name="Job 1: Real-time Price Poll (Threaded)",
+                name="Job 1: Real-time Price Poll (10s aligned, market hours only)",
                 replace_existing=True,
                 max_instances=1,
                 coalesce=True,  # Skip missed runs if scheduler is overloaded
             )
             
             logger.info(
-                f"Job 1 scheduled: Every {settings.POLL_INTERVAL_SECONDS}s, "
+                f"Job 1 scheduled: Every 10 seconds (0,10,20,30,40,50) during market hours, "
                 f"{len(self.all_symbols)} symbols, 5 workers, 100 symbols/batch"
             )
             
-            # Job 3: EOD bar loading daily at 4:15 PM ET (16:15)
-            # Runs at 16:15 every weekday (Mon-Fri)
+            # Job 3: EOD bar loading exactly 15 minutes after market close
+            # Market closes at 4:00 PM ET → Job 3 runs at 4:15 PM ET (16:15)
+            # Runs every weekday (Mon-Fri)
             self.eod_job = self.scheduler.add_job(
                 func=self._load_eod_bars,
-                trigger=CronTrigger(hour=16, minute=15, day_of_week="mon-fri"),
+                trigger=CronTrigger(
+                    hour=16,
+                    minute=15,
+                    day_of_week="mon-fri",
+                    timezone='America/New_York'
+                ),
                 id="eod_bars_job3",
-                name="Job 3: EOD Bars (Daily)",
+                name="Job 3: EOD Bars (15 min after market close)",
                 replace_existing=True,
                 max_instances=1,
             )
             
-            logger.info("Job 3 scheduled: Daily at 16:15 (4:15 PM ET)")
+            logger.info("Job 3 scheduled: 16:15 ET (4:15 PM, 15 min after market close) Mon-Fri")
             
             self.scheduler.start()
             self.is_running = True
@@ -98,9 +130,15 @@ class SchedulerManager:
         """
         Job 1: Poll market data for all validated symbols using threading.
         
+        Only runs during market hours (9:30 AM - 4:00 PM ET, Mon-Fri).
         Splits symbols into batches of 100 and uses ThreadPoolExecutor with 5 workers
         for parallel API requests.
         """
+        # Check if market is open before executing
+        if not is_market_open():
+            logger.debug("Market is closed, skipping Job 1 poll")
+            return
+        
         logger.debug(f"Job 1 triggered: Fetching prices for {len(self.all_symbols)} symbols")
         
         try:
@@ -131,8 +169,9 @@ class SchedulerManager:
 
     def _load_eod_bars(self):
         """
-        Job 3: Load EOD bars for all symbols (runs daily at market close + 15 min).
+        Job 3: Load EOD bars for all symbols (runs 15 minutes after market close).
         
+        Executes at 4:15 PM ET every weekday (market closes at 4:00 PM ET).
         Fetches the previous day's bar for each symbol and inserts into database.
         """
         logger.info(f"Job 3 triggered: Loading EOD bars for {len(self.all_symbols)} symbols")
