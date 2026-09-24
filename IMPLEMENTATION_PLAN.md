@@ -1,7 +1,7 @@
 # Implementation Plan - Complete Execution
 
 ## Overview
-Refactored ticker service to support 469 symbols with 3 distributed jobs + historical price tracking.
+Refactored ticker service to support up to 469 symbols (469 input from overlap.txt, validated to ~421 valid via Alpaca API) with 3 distributed jobs + historical price tracking.
 
 ---
 
@@ -37,7 +37,7 @@ instrument_price_history (NEW)
 **New Method:**
 - `fetch_and_persist_prices_batch(symbols, num_workers=5, batch_size=100)` - JOB 1
   - Uses ThreadPoolExecutor with 5 workers
-  - Batches 469 symbols into 5 requests of ~94 each
+  - Batches validated symbols into requests of ~100 each
   - Runs every 10 seconds
   - Updates `instruments` table (bid, ask, mid_price)
 
@@ -59,14 +59,14 @@ instrument_price_history (NEW)
 
 ### SchedulerManager (`app/services/scheduler.py`)
 **Job 1: Real-Time Quotes (Every 10 seconds)**
-- Batches 469 symbols into 5 parallel requests
-- ThreadPoolExecutor(5 workers) × 100 symbols/batch
+- Batches all validated symbols into parallel requests of ~100 each
+- ThreadPoolExecutor(5 workers) runs batches in parallel
 - Updates `instruments.bid`, `ask`, `mid_price`
 - Logs: success count, batch results
 
 **Job 3: EOD Bars (Daily at 4:15 PM)**
 - Runs Mon-Fri at 16:15 (4:15 PM ET)
-- Fetches previous day bar for all 469 symbols
+- Fetches previous day bar for all validated symbols
 - Inserts into `instrument_price_history`
 - Logs: success/failure per symbol, progress every 50 symbols
 
@@ -75,27 +75,27 @@ instrument_price_history (NEW)
 ## Phase 3: Bootstrap & Cold-Start Scripts ✅
 
 ### `app/bootstrap_instruments.py` - Initialization Script
-**Purpose:** One-time setup to populate `instruments` table
+**Purpose:** One-time setup to populate `instruments` table with validated symbols
 
 **Features:**
-- Loads symbols from `overlap.txt` (469 total)
+- Loads symbols from `overlap.txt` (469 total input)
 - Validates each symbol via Alpaca API (calls in batches of 100)
-- Creates `Instrument` records for valid symbols
+- Creates `Instrument` records for VALID symbols only (~421)
 - Logs invalid symbols (no API data)
 - Can be run standalone: `python -m app.bootstrap_instruments`
 
 **Output:**
 ```
-Created: X instruments
-Already exist: Y instruments
-Invalid: Z symbols (logged for review)
+Created: 421 instruments (valid)
+Already exist: 0 instruments
+Invalid: 48 symbols (logged for review)
 ```
 
 ### `app/cold_start_bars.py` - Job 2 (Manual Backload)
-**Purpose:** One-time job to load 365 days of historical data
+**Purpose:** One-time job to load 365 days of historical data for all validated symbols
 
 **Features:**
-- Loads all 469 instruments from database
+- Loads all validated instruments from database (421 total)
 - Fetches 365 days of bars per symbol sequentially
 - Inserts batch OHLC records into `instrument_price_history`
 - Logs progress every symbol and every 50 symbols
@@ -106,14 +106,14 @@ Invalid: Z symbols (logged for review)
 python -m app.cold_start_bars
 ```
 
-**Duration Estimate:** 10-15 minutes (469 symbols × 365 days ÷ 15-20 bars/sec API rate)
+**Duration Estimate:** 10-15 minutes (421 symbols × 365 days ÷ 15-20 bars/sec API rate)
 
 **Output:**
 ```
-Total symbols: 469
-Successful: 469
+Total symbols: 421
+Successful: 421
 Failed: 0
-Total bars inserted: ~171,385 (469 × 365)
+Total bars inserted: ~106,000 (421 × 252 trading days)
 ```
 
 ---

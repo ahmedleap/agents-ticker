@@ -32,12 +32,27 @@ price_service: PriceService = None
 bars_service: BarsService = None
 health_checker: HealthChecker = None
 scheduler_manager = None
-all_symbols = []  # All 469 symbols from overlap.txt
+all_symbols = []  # All valid symbols from instruments table (or overlap.txt fallback)
 
 
 def load_symbols_from_overlap() -> list:
-    """Load symbols from overlap.txt file."""
+    """
+    Load symbols from database (primary) or overlap.txt (fallback).
+    
+    Returns symbols that are already bootstrapped in the instruments table.
+    Falls back to overlap.txt only if database has no instruments.
+    """
     try:
+        # Try to load from database first
+        with db_manager.session_scope() as session:
+            instruments = session.query(Instrument.ticker).all()
+            if instruments:
+                symbols = sorted([row[0].upper() for row in instruments])
+                logger.info(f"Loaded {len(symbols)} symbols from database")
+                return symbols
+        
+        # Fallback: Load from overlap.txt if database is empty
+        logger.info("No instruments in database, loading from overlap.txt as fallback")
         symbol_file = Path(__file__).parent.parent / "overlap.txt"
         symbols = []
         
@@ -57,11 +72,12 @@ def load_symbols_from_overlap() -> list:
         
         # Remove duplicates and sort
         symbols = sorted(list(set(symbols)))
-        logger.info(f"Loaded {len(symbols)} symbols from overlap.txt")
+        logger.info(f"Loaded {len(symbols)} symbols from overlap.txt fallback")
         return symbols
         
     except Exception as e:
-        logger.error(f"Failed to load symbols from overlap.txt: {e}")
+        logger.error(f"Failed to load symbols: {e}")
+        logger.warning("Service will run with empty symbol list - prices will not be fetched")
         return []
 
 

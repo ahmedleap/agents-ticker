@@ -23,7 +23,7 @@ class SchedulerManager:
     def __init__(self, price_service: PriceService, bars_service: BarsService, all_symbols: List[str]):
         self.price_service = price_service
         self.bars_service = bars_service
-        self.all_symbols = all_symbols  # All 469 symbols for Job 1
+        self.all_symbols = all_symbols  # All validated symbols from instruments table for Job 1
         self.scheduler: Optional[BackgroundScheduler] = None
         self.poll_job: Optional[Job] = None
         self.eod_job: Optional[Job] = None
@@ -42,7 +42,7 @@ class SchedulerManager:
             self.scheduler = BackgroundScheduler()
             
             # Job 1: Real-time quote fetching every 10 seconds
-            # Uses threading to batch 469 symbols into 5 requests of ~94 each
+            # Uses threading to batch all symbols into requests of ~100 each
             self.poll_job = self.scheduler.add_job(
                 func=self._poll_market_data_threaded,
                 trigger=IntervalTrigger(seconds=settings.POLL_INTERVAL_SECONDS),
@@ -96,7 +96,7 @@ class SchedulerManager:
 
     def _poll_market_data_threaded(self):
         """
-        Job 1: Poll market data for all 469 symbols using threading.
+        Job 1: Poll market data for all validated symbols using threading.
         
         Splits symbols into batches of 100 and uses ThreadPoolExecutor with 5 workers
         for parallel API requests.
