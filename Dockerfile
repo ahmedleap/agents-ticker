@@ -36,8 +36,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy virtual environment from builder
 COPY --from=builder /opt/venv /opt/venv
 
-# Copy application code
+# Copy application code and symbol list
 COPY app ./app
+COPY overlap.txt ./
 
 # Set environment variables
 ENV PATH="/opt/venv/bin:$PATH"
