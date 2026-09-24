@@ -1,552 +1,455 @@
-# Market Data Service
+# Market Data Ticker Service
 
-A standalone, containerized market data service that fetches real-time bid/ask prices from Alpaca and persists them to PostgreSQL. The service is designed to operate independently from authentication, user management, trading logic, and order execution systems.
+Real-time stock price polling and automated daily bar aggregation service built with FastAPI, SQLAlchemy, and Alpaca Markets API.
 
-## Architecture
+## Overview
+
+This service maintains two concurrent jobs:
+- **Job 1** (Every 10 seconds): Fetch latest bid/ask prices for 421 stocks and update database
+- **Job 3** (Daily at 16:15 ET, Mon-Fri): Load previous day's OHLCV bar for each stock
+
+Initial setup requires:
+- **Job 2** (One-time manual): Load 365 days of historical data for all stocks (local only)
+
+---
+
+## Directory Structure
 
 ```
-Alpaca API → Market Data Service → PostgreSQL ← Spring Backend
+ticker_service/
+├── app/                              # Main application package
+│   ├── __init__.py
+│   ├── main.py                       # FastAPI app, startup/shutdown, health endpoint
+│   ├── config.py                     # Settings management (reads .env)
+│   ├── database.py                   # SQLAlchemy session, connection pooling
+│   ├── models.py                     # ORM models: Instrument, InstrumentPriceHistory
+│   ├── health.py                     # Health check logic
+│   │
+│   ├── bootstrap_instruments.py      # Script: Load 469 symbols, validate with Alpaca
+│   ├── cold_start_bars.py            # Script: Load 365 days of historical bars
+│   │
+│   └── services/                     # Business logic layer
+│       ├── __init__.py
+│       ├── alpaca_service.py         # Alpaca API wrapper (quotes, bars)
+│       ├── price_service.py          # Job 1 implementation (real-time polling)
+│       ├── bars_service.py           # Jobs 2&3 implementation (historical + daily)
+│       └── scheduler.py              # APScheduler setup (Job 1 & 3 timing)
+│
+├── schema.sql                        # PostgreSQL schema (instruments + price_history)
+├── requirements.txt                  # Python dependencies
+├── Dockerfile                        # Multi-stage production build
+├── docker-compose.yml                # Service orchestration
+├── .env                              # ⚠️  Local credentials (NOT COMMITTED)
+├── .gitignore                        # Excludes test files, credentials, images
+├── README.md                         # This file
+├── IMPLEMENTATION_PLAN.md            # Detailed architecture & design decisions
+│
+└── overlap.txt                       # 469 stock symbols to validate
 ```
 
-### Components
-
-- **Alpaca API Integration**: Fetches latest quotes (bid/ask prices) every 10 seconds
-- **Data Transformation**: Calculates midpoint prices from bid/ask data
-- **PostgreSQL Persistence**: Stores raw bid, ask, and calculated midpoint prices
-- **Health Endpoints**: Provides monitoring and status information
-- **Resilience**: Continues operating even if Alpaca becomes temporarily unavailable
-
-## Features
-
-✅ **Periodic Market Data Polling**: Configurable interval (default: 10 seconds)  
-✅ **Bid/Ask Price Storage**: Stores raw market data from Alpaca  
-✅ **Midpoint Calculation**: Automatically calculates `(bid + ask) / 2`  
-✅ **Error Resilience**: Failures don't crash the service or modify database  
-✅ **Health Monitoring**: Comprehensive health check endpoints  
-✅ **Status Reporting**: Detailed statistics on fetch success rates  
-✅ **Docker Support**: Complete containerization with Docker Compose  
-✅ **Environment-Driven Configuration**: All settings via environment variables  
-✅ **Logging**: Comprehensive logging with timestamps and symbol counts  
-
-## Prerequisites
-
-- Docker and Docker Compose (for containerized deployment)
-- OR Python 3.11+ (for local development)
-- Alpaca API credentials (get them at https://app.alpaca.markets)
-- PostgreSQL 13+ (or use the containerized version)
+---
 
 ## Quick Start
 
-### Using Docker Compose (Recommended)
+### 1. Local Development
 
-1. **Clone the repository and navigate to the service directory:**
+**Setup (one-time):**
 ```bash
-cd ticker_service
-```
+# Create virtual environment
+python -m venv ticker_venv
+source ticker_venv/bin/activate  # Windows: .\ticker_venv\Scripts\Activate.ps1
 
-2. **Configure environment variables:**
-```bash
-# Copy the example env file
-cp .env.example .env
-
-# Edit .env with your Alpaca API credentials
-nano .env
-```
-
-3. **Update these required environment variables:**
-```env
-ALPACA_API_KEY=your_actual_alpaca_api_key
-ALPACA_SECRET_KEY=your_actual_alpaca_secret_key
-DB_PASSWORD=your_secure_password  # Change from default
-```
-
-4. **Start the services:**
-```bash
-docker-compose up -d
-```
-
-5. **Verify the service is running:**
-```bash
-# Check service health
-curl http://localhost:8000/health
-
-# Check market data status
-curl http://localhost:8000/market-data/status
-```
-
-### Local Development Setup
-
-1. **Create a virtual environment:**
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-2. **Install dependencies:**
-```bash
+# Install dependencies
 pip install -r requirements.txt
+
+# Create .env with local credentials
+cat > .env << EOF
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=test_db
+DB_USER=test
+DB_PASSWORD=test
+ALPACA_API_KEY=your_api_key
+ALPACA_SECRET_KEY=your_secret_key
+ALPACA_BASE_URL=https://paper-api.alpaca.markets
+ALPACA_DATA_URL=https://data.alpaca.markets
+POLL_INTERVAL_SECONDS=10
+REQUEST_TIMEOUT_SECONDS=30
+EOF
+
+# Start local PostgreSQL and load schema
+psql -U test -d test_db -f schema.sql
 ```
 
-3. **Configure environment:**
+**Bootstrap data (one-time, local only):**
 ```bash
-cp .env.example .env
-# Edit .env with your settings
+# Step 1: Load 469 symbols, validate against Alpaca (filters to 421 valid)
+python -m app.bootstrap_instruments
+
+# Step 2: Load 365 days of historical data for all 421 symbols (~5-10 minutes)
+python -m app.cold_start_bars
 ```
 
-4. **Set up the database:**
+**Run locally:**
 ```bash
-# Start PostgreSQL (must be running)
-# Then run migrations:
-psql -h localhost -U postgres -d agents_of_leap -f migrations/001_add_bid_ask_prices.sql
+# Start FastAPI service (Job 1 & Job 3 start automatically)
+uvicorn app.main:app --reload
+
+# In another terminal, test:
+curl http://localhost:8000/health
 ```
 
-5. **Run the service:**
+---
+
+## Database Setup
+
+### Schema
+Two tables store all data:
+
+**`instruments`** (421 rows)
+- `instrument_id` (UUID): Primary key
+- `ticker` (VARCHAR): Stock symbol (AAPL, MSFT, etc.)
+- `name` (VARCHAR): Company name
+- `asset_class` (ENUM): 'STOCK'
+- `bid` (NUMERIC): Current bid price (updated by Job 1)
+- `ask` (NUMERIC): Current ask price (updated by Job 1)
+- `mid_price` (NUMERIC): Generated as (bid + ask) / 2
+- `price_updated_at` (TIMESTAMP): When prices were last refreshed
+
+**`instrument_price_history`** (~106,000 rows)
+- `price_history_id` (UUID): Primary key
+- `instrument_id` (UUID): FK to instruments
+- `timestamp` (TIMESTAMP): Date of bar (UTC)
+- `open`, `high`, `low`, `close` (NUMERIC): OHLCV data
+- `volume` (INTEGER): Trading volume
+
+Index: `(instrument_id, timestamp DESC)` for efficient time-series queries
+
+---
+
+## Job Specifications
+
+### Job 1: Real-Time Quote Polling (Every 10 seconds)
+**Implementation:** [app/services/price_service.py](app/services/price_service.py)
+
+**Process:**
+1. Batch all 421 symbols into groups of 100
+2. Use ThreadPoolExecutor (5 workers) to fetch quotes in parallel
+3. For each symbol, update `bid`, `ask`, `mid_price`, `price_updated_at` in `instruments` table
+4. Log: "inserted 421 prices from 5 batches"
+
+**API:** Alpaca Quotes (`/v2/stocks/quotes/latest`)
+
+**Duration:** ~500ms per batch × 5 batches = ~2.5 seconds
+
+**Timing:** Configurable via `POLL_INTERVAL_SECONDS` (default: 10s)
+
+---
+
+### Job 2: Cold-Start Historical Data (Manual, One-Time)
+**Implementation:** [app/cold_start_bars.py](app/cold_start_bars.py)
+
+**Purpose:** Backload 365 days of historical data for all symbols
+
+**Process:**
+1. Query all 421 instruments from database
+2. For each symbol:
+   - Calculate date range: (now - 15 minutes) - 365 days back
+   - Fetch bars from Alpaca using `/v2/stocks/bars` endpoint
+   - Batch insert into `instrument_price_history`
+3. Log progress per symbol, summary stats
+
+**API:** Alpaca Bars (`/v2/stocks/bars?feed=iex`)
+
+**Duration:** ~280 seconds (~4.7 minutes) for 421 symbols
+
+**Result:** ~106,000 bars inserted (~252 trading days × 421 symbols)
+
+**Run once locally:**
 ```bash
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+python -m app.cold_start_bars
 ```
+
+**Note:** Requires Job 2 to complete before service can run (instruments must exist first)
+
+---
+
+### Job 3: Daily EOD Bar Loading (Automated, Mon-Fri at 16:15 ET)
+**Implementation:** [app/services/bars_service.py](app/services/bars_service.py)
+
+**Purpose:** Append previous trading day's OHLCV bar to history
+
+**Process:**
+1. Runs daily at 16:15 ET (20:15 UTC) on trading days (Mon-Fri)
+2. For each of 421 symbols:
+   - Fetch most recent bar (previous trading day)
+   - Extract OHLCV + volume
+   - Insert single row to `instrument_price_history`
+3. Log: "Completed EOD bar loading: 421 successful, 0 failed"
+
+**API:** Alpaca Bars (`/v2/stocks/bars?feed=iex&end_date=<yesterday>`)
+
+**Constraint:** End date must be ≥ 15 minutes in the past (Alpaca Basic plan requirement)
+
+**Duration:** ~2-3 seconds
+
+**Timing:** Scheduled via APScheduler `CronTrigger(hour=16, minute=15, day_of_week="mon-fri")`
+
+---
+
+## Deployment
+
+### Production (EC2 Linux VM)
+
+**Prerequisites:**
+- Docker & Docker Compose
+- PostgreSQL 18 running separately (not in docker-compose)
+- Network access to Alpaca API
+
+**Steps:**
+
+1. **Clone repository:**
+   ```bash
+   cd /home/ec2-user
+   git clone <repo-url> agents-ticker
+   cd agents-ticker
+   ```
+
+2. **Create .env with credentials:**
+   ```bash
+   cat > .env << EOF
+   DB_HOST=10.14.136.99
+   DB_PORT=5432
+   DB_NAME=test_db
+   DB_USER=test
+   DB_PASSWORD=<password>
+   ALPACA_API_KEY=<key>
+   ALPACA_SECRET_KEY=<secret>
+   ALPACA_BASE_URL=https://paper-api.alpaca.markets
+   ALPACA_DATA_URL=https://data.alpaca.markets
+   POLL_INTERVAL_SECONDS=10
+   EOF
+   ```
+
+3. **Load schema (one-time):**
+   ```bash
+   docker exec -i test_postgres psql -U test -d test_db < schema.sql
+   ```
+
+4. **Build & run:**
+   ```bash
+   docker-compose build
+   docker-compose up -d ticker-service
+   ```
+
+5. **Verify:**
+   ```bash
+   docker logs -f ticker-service
+   curl http://localhost:8000/health
+   ```
+
+---
 
 ## API Endpoints
 
-### Health & Status
-
-#### `GET /health`
-Check overall service health.
-
-**Response:**
+### Health Check
+```bash
+GET /health
+```
+Response:
 ```json
 {
-  "status": "up",
-  "timestamp": "2024-01-15T14:30:00.123456",
-  "database": "up",
-  "alpaca": "up",
-  "service_name": "market-data-service",
-  "uptime_info": "service started"
+  "status": "healthy",
+  "timestamp": "2026-09-24T16:00:00.000Z"
 }
 ```
 
-**Status Values:**
-- `up`: All systems operational
-- `degraded`: Some systems down but service is attempting to recover
-- `down`: Service cannot operate
-
-#### `GET /health/ready`
-Kubernetes readiness probe endpoint.
-
-**Response:**
-```json
-{
-  "ready": true,
-  "database_connected": true,
-  "alpaca_accessible": true
-}
-```
-
-#### `GET /market-data/status`
-Detailed market data service status and statistics.
-
-**Response:**
-```json
-{
-  "service": "market-data-service",
-  "timestamp": "2024-01-15T14:30:00.123456",
-  "status": "operational",
-  "last_successful_fetch": "2024-01-15T14:29:50.123456",
-  "last_error": null,
-  "symbols_tracked": ["AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "SPY", "QQQ"],
-  "symbols_count": 7,
-  "provider": "alpaca",
-  "poll_interval_seconds": 10,
-  "statistics": {
-    "total_fetches": 42,
-    "successful_fetches": 40,
-    "failed_fetches": 2,
-    "total_prices_inserted": 280,
-    "success_rate_percent": 95.24
-  }
-}
-```
-
-### Market Data
-
-#### `GET /market-data/latest/{symbol}`
-Get the latest price for a specific symbol.
-
-**Parameters:**
-- `symbol` (path): Ticker symbol (e.g., `AAPL`)
-
-**Response:**
-```json
-{
-  "symbol": "AAPL",
-  "bid": 150.25,
-  "ask": 150.35,
-  "midpoint": 150.30,
-  "as_of": "2024-01-15T14:30:00"
-}
-```
-
-### Scheduler
-
-#### `GET /scheduler/status`
-Get the status of the polling scheduler.
-
-**Response:**
-```json
-{
-  "is_running": true,
-  "poll_interval_seconds": 10,
-  "next_run": "2024-01-15T14:30:10.123456",
-  "job_count": 1
-}
-```
-
-### Service Information
-
-#### `GET /`
-Service information and available endpoints.
-
-**Response:**
-```json
-{
-  "service": "market-data-service",
-  "version": "1.0.0",
-  "status": "operational",
-  "documentation": "/docs",
-  "endpoints": {
-    "health": "GET /health",
-    "readiness": "GET /health/ready",
-    "market_data_status": "GET /market-data/status",
-    "scheduler_status": "GET /scheduler/status",
-    "latest_price": "GET /market-data/latest/{symbol}"
-  }
-}
-```
+---
 
 ## Configuration
 
-All configuration is managed through environment variables in the `.env` file.
+All settings read from `.env`:
 
-### Database Configuration
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `DB_HOST` | localhost | PostgreSQL hostname |
+| `DB_PORT` | 5432 | PostgreSQL port |
+| `DB_NAME` | test_db | Database name |
+| `DB_USER` | test | Database user |
+| `DB_PASSWORD` | test | Database password |
+| `ALPACA_API_KEY` | (required) | Paper trading API key |
+| `ALPACA_SECRET_KEY` | (required) | Paper trading secret |
+| `ALPACA_BASE_URL` | https://paper-api.alpaca.markets | Quote API endpoint |
+| `ALPACA_DATA_URL` | https://data.alpaca.markets | Bars API endpoint |
+| `POLL_INTERVAL_SECONDS` | 10 | Job 1 frequency |
+| `REQUEST_TIMEOUT_SECONDS` | 30 | API timeout |
+| `LOG_LEVEL` | INFO | Logging level (DEBUG/INFO/ERROR) |
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DB_HOST` | localhost | PostgreSQL host |
-| `DB_PORT` | 15432 | PostgreSQL port |
-| `DB_NAME` | agents_of_leap | Database name |
-| `DB_USER` | postgres | Database user |
-| `DB_PASSWORD` | postgres | Database password |
-| `DB_POOL_SIZE` | 5 | Connection pool size |
-| `DB_MAX_OVERFLOW` | 10 | Maximum overflow connections |
+---
 
-### Alpaca Configuration
+## Monitoring
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `ALPACA_API_KEY` | (required) | Alpaca API key |
-| `ALPACA_SECRET_KEY` | (required) | Alpaca secret key |
-| `ALPACA_BASE_URL` | https://paper-api.alpaca.markets | Alpaca API base URL |
-| `ALPACA_DATA_URL` | https://data.alpaca.markets | Alpaca data API URL |
-
-### Polling Configuration
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `POLL_INTERVAL_SECONDS` | 10 | How often to fetch data (seconds) |
-| `REQUEST_TIMEOUT_SECONDS` | 30 | Alpaca request timeout (seconds) |
-| `MAX_RETRIES` | 3 | Maximum retry attempts |
-| `RETRY_BACKOFF_FACTOR` | 2.0 | Exponential backoff factor |
-
-### Tracked Symbols
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `TRACKED_SYMBOLS` | AAPL,MSFT,GOOGL,AMZN,TSLA,SPY,QQQ | Comma-separated ticker symbols |
-
-### Service Configuration
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SERVICE_NAME` | market-data-service | Service name |
-| `SERVICE_PORT` | 8000 | HTTP port |
-| `SERVICE_HOST` | 0.0.0.0 | Bind address |
-| `DEBUG` | false | Enable debug logging |
-| `LOG_LEVEL` | INFO | Logging level |
-
-## Database Schema
-
-### instrument_prices Table
-
-The service persists market data to the `instrument_prices` table:
-
-```sql
-CREATE TABLE instrument_prices (
-    price_id        UUID PRIMARY KEY,
-    instrument_id   UUID NOT NULL,
-    bid_price       NUMERIC(18,4),         -- Raw bid price from Alpaca
-    ask_price       NUMERIC(18,4),         -- Raw ask price from Alpaca
-    price           NUMERIC(18,4),         -- Calculated midpoint
-    as_of           TIMESTAMP NOT NULL,    -- Quote timestamp from provider
-    created_at      TIMESTAMP NOT NULL,    -- When record was inserted
-    data_source     VARCHAR(50),           -- Source (e.g., 'alpaca')
-    FOREIGN KEY (instrument_id) REFERENCES instruments(instrument_id)
-);
-```
-
-### Example Query
-
-Get the latest prices for all tracked symbols:
-
-```sql
-SELECT 
-    i.ticker,
-    ip.bid_price,
-    ip.ask_price,
-    ip.price as midpoint,
-    ip.as_of,
-    ip.created_at
-FROM instrument_prices ip
-JOIN instruments i ON ip.instrument_id = i.instrument_id
-WHERE ip.as_of IN (
-    SELECT MAX(as_of) 
-    FROM instrument_prices 
-    GROUP BY instrument_id
-)
-ORDER BY i.ticker;
-```
-
-## Logging
-
-The service provides comprehensive logging with the following events:
-
-```
-[2024-01-15 14:30:00] Market data poll triggered for 7 symbols
-[2024-01-15 14:30:00] Fetching quotes for 7 symbols: AAPL,MSFT,GOOGL,AMZN,TSLA,SPY,QQQ
-[2024-01-15 14:30:01] Successfully fetched 7 quotes from Alpaca
-[2024-01-15 14:30:01] Successfully inserted 7 prices into database
-[2024-01-15 14:30:01] Fetch completed successfully: requested=7, inserted=7
-```
-
-## Docker Deployment
-
-### Start the Service
-
+### Job 1 Logs (Every 10 seconds)
 ```bash
-docker-compose up -d
+docker logs ticker-service | grep "inserted.*prices"
+# 2026-09-24 16:00:00,000 - app.services.scheduler - INFO - inserted 421 prices from 5 batches
 ```
 
-### View Logs
-
+### Job 3 Logs (Daily at 16:15 ET)
 ```bash
-# All services
-docker-compose logs -f
-
-# Market data service only
-docker-compose logs -f market-data-service
-
-# PostgreSQL only
-docker-compose logs -f postgres
+docker logs ticker-service | grep "EOD"
+# 2026-09-24 20:15:00,000 - app.services.scheduler - INFO - Completed EOD bar loading: 421 successful
 ```
 
-### Stop the Service
-
+### Database Queries
 ```bash
-docker-compose down
+# Check latest prices
+docker exec test_postgres psql -U test -d test_db -c "
+  SELECT ticker, bid, ask, mid_price, price_updated_at 
+  FROM instruments 
+  ORDER BY price_updated_at DESC 
+  LIMIT 5;
+"
+
+# Check price history
+docker exec test_postgres psql -U test -d test_db -c "
+  SELECT i.ticker, COUNT(*) as bars, MAX(h.timestamp) as latest_date
+  FROM instrument_price_history h
+  JOIN instruments i ON h.instrument_id = i.instrument_id
+  GROUP BY i.ticker
+  ORDER BY latest_date DESC
+  LIMIT 5;
+"
 ```
 
-### Rebuild Images
+---
 
+## Symbol Validation
+
+**Input:** 469 symbols from [overlap.txt](overlap.txt)
+
+**Validation Process:**
+- `bootstrap_instruments.py` batches symbols and queries Alpaca Quotes API
+- Only symbols with available quote data are inserted into database
+- Invalid symbols logged but not fatal
+
+**Result:** 421 valid symbols (48 rejected by Alpaca)
+
+**To check invalid symbols:**
 ```bash
-docker-compose build --no-cache
+python -m app.test_symbols  # Generates invalid_symbols.txt (local only)
 ```
 
-### Access the Service
-
-- **API**: http://localhost:8000
-- **Swagger Docs**: http://localhost:8000/docs
-- **ReDoc Docs**: http://localhost:8000/redoc
-- **Database**: localhost:15432 (from outside container)
-
-## Error Handling & Resilience
-
-### Alpaca Unavailability
-
-If Alpaca becomes temporarily unavailable:
-
-1. **Logging**: Error is logged with details
-2. **Database**: No records are modified or deleted
-3. **State**: Service continues running
-4. **Retry**: Polling continues on the next scheduled cycle
-5. **Status**: Error is visible in `/market-data/status` endpoint
-
-### Database Connection Loss
-
-If the database becomes unavailable:
-
-1. **Connection**: Service attempts to reconnect on startup
-2. **Polling**: Scheduled polling does not execute (no crash)
-3. **Status**: Database status shown as "down" in health check
-4. **Logging**: Connection errors are logged
-
-### Service Recovery
-
-The service is designed to remain alive and recover automatically:
-
-- Connection pools are managed with configurable timeouts
-- Failed requests don't crash the polling scheduler
-- All errors are logged for monitoring and debugging
-
-## Monitoring & Alerting
-
-### Kubernetes Integration
-
-The service includes health check endpoints suitable for Kubernetes probes:
-
-```yaml
-livenessProbe:
-  httpGet:
-    path: /health
-    port: 8000
-  initialDelaySeconds: 10
-  periodSeconds: 30
-
-readinessProbe:
-  httpGet:
-    path: /health/ready
-    port: 8000
-  initialDelaySeconds: 5
-  periodSeconds: 10
-```
-
-### Metrics to Monitor
-
-1. **Success Rate**: `statistics.success_rate_percent` from `/market-data/status`
-2. **Last Successful Fetch**: `last_successful_fetch` timestamp
-3. **Failed Fetches**: `statistics.failed_fetches` count
-4. **Service Health**: Status from `/health` endpoint
-
-## Testing
-
-### Test the Service Locally
-
-```bash
-# Health check
-curl http://localhost:8000/health
-
-# Market data status
-curl http://localhost:8000/market-data/status
-
-# Get latest price for AAPL
-curl http://localhost:8000/market-data/latest/AAPL
-
-# Interactive API docs
-open http://localhost:8000/docs
-```
-
-### Test Database Connection
-
-```bash
-# From inside the container
-docker exec market-data-service psql -h postgres -U postgres -d agents_of_leap -c "SELECT COUNT(*) FROM instrument_prices;"
-
-# From host machine
-psql -h localhost -U postgres -d agents_of_leap -p 15432 -c "SELECT COUNT(*) FROM instrument_prices;"
-```
+---
 
 ## Troubleshooting
 
 ### Service won't start
-
-1. **Check PostgreSQL is running**: `docker-compose logs postgres`
-2. **Verify environment variables**: Check `.env` file has correct values
-3. **Check port conflicts**: Ensure 8000 and 15432 are available
-4. **View service logs**: `docker-compose logs market-data-service`
-
-### No prices in database
-
-1. **Check Alpaca credentials**: Verify `ALPACA_API_KEY` and `ALPACA_SECRET_KEY`
-2. **Check tracked symbols**: Verify `TRACKED_SYMBOLS` includes valid tickers
-3. **Check polling status**: `curl http://localhost:8000/scheduler/status`
-4. **Check for Alpaca errors**: `curl http://localhost:8000/market-data/status` and review `last_error`
-
-### Database connection errors
-
-1. **Check PostgreSQL**: `docker-compose logs postgres`
-2. **Verify credentials**: Ensure `DB_HOST`, `DB_USER`, `DB_PASSWORD` match
-3. **Check network**: Services must be on same Docker network
-4. **Wait for startup**: PostgreSQL takes a few seconds to start
-
-## Future Extensions
-
-The service is designed for extensibility to support additional data sources:
-
-- **Cryptocurrency**: Extend `alpaca_service.py` to handle crypto quotes
-- **Forex**: Add forex market data support
-- **Other Providers**: Add adapters for other data providers (Yahoo, IEX, etc.)
-- **Data Enrichment**: Add technical indicators, moving averages, etc.
-- **Historical Data**: Backfill historical price data
-- **Real-time WebSocket**: Add WebSocket support for streaming prices
-
-## Architecture Diagram
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     Market Data Service                          │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                   │
-│  FastAPI Application (main.py)                                   │
-│  ├─ GET /health                     [Health Check]               │
-│  ├─ GET /health/ready               [Readiness Probe]            │
-│  ├─ GET /market-data/status         [Status & Statistics]        │
-│  ├─ GET /market-data/latest/{sym}   [Latest Price Query]         │
-│  └─ GET /scheduler/status           [Scheduler Status]           │
-│                                                                   │
-│  Background Scheduler (scheduler.py)                             │
-│  └─ Every 10 seconds → fetch_and_persist_prices()               │
-│                                                                   │
-│  Price Service (price_service.py)                                │
-│  ├─ Calls Alpaca API                                             │
-│  ├─ Parses bid/ask prices                                        │
-│  ├─ Calculates midpoint = (bid + ask) / 2                       │
-│  └─ Persists to PostgreSQL                                       │
-│                                                                   │
-│  Alpaca Service (alpaca_service.py)                              │
-│  ├─ HTTP client to Alpaca API                                    │
-│  └─ Quote data transformation                                    │
-│                                                                   │
-│  Database Layer (database.py, models.py)                         │
-│  └─ SQLAlchemy ORM with connection pooling                      │
-│                                                                   │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                    ┌─────────┴─────────┐
-                    │                   │
-        ┌───────────▼──────────┐  ┌────▼─────────────┐
-        │   Alpaca API         │  │  PostgreSQL      │
-        │   (Market Data)      │  │  (Persistence)   │
-        │                      │  │                  │
-        │ Latest Quotes for    │  │ instrument_prices│
-        │ - Bid Prices         │  │ - bid_price      │
-        │ - Ask Prices         │  │ - ask_price      │
-        │ - Timestamps         │  │ - price (midpoint)
-        │                      │  │ - as_of          │
-        └──────────────────────┘  └──────────────────┘
-```
-
-## Support & Issues
-
-For issues, bugs, or feature requests, please check the logs and health endpoints:
-
 ```bash
-# Comprehensive diagnostic information
-curl http://localhost:8000/market-data/status | jq .
-
-# Check application logs
-docker-compose logs -f market-data-service
-
-# Access PostgreSQL directly
-docker exec -it agents-of-leap-db psql -U postgres -d agents_of_leap
+docker logs ticker-service
+# Check for:
+# - Database connection errors
+# - Invalid Alpaca credentials (401)
+# - Schema not loaded
 ```
 
-## License
+### Prices not updating
+- Job 1 runs every 10 seconds during service runtime
+- Check logs: `docker logs ticker-service | grep "inserted"`
+- Verify Alpaca API credentials in .env
 
-This project is part of the Agents of Leap platform.
+### EOD bars not loading
+- Job 3 only runs Mon-Fri at 16:15 ET
+- Requires symbols to be bootstrapped first
+- Check logs: `docker logs ticker-service | grep "EOD"`
+
+### Database connection refused
+```bash
+# Verify PostgreSQL is running and accessible
+docker exec test_postgres psql -U test -d test_db -c "SELECT 1;"
+```
+
+---
+
+## Architecture Decisions
+
+**See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for:**
+- Detailed rationale for Bars API vs Quotes API for historical data
+- Threading model (ThreadPoolExecutor with 5 workers)
+- Scheduling strategy (APScheduler with CronTrigger)
+- Schema design & indexing
+- Performance benchmarks (1.8s for 365 days vs 27s for quotes)
+
+---
+
+## File Usage Summary
+
+| File | Purpose | Run When |
+|------|---------|----------|
+| [bootstrap_instruments.py](app/bootstrap_instruments.py) | Load symbols from overlap.txt, validate against Alpaca | Once locally, before cold_start_bars |
+| [cold_start_bars.py](app/cold_start_bars.py) | Load 365 days of historical data | Once locally, before deploying service |
+| [main.py](app/main.py) | FastAPI service + Job 1 & 3 schedulers | Every deployment (Docker) |
+| [test_symbols.py](app/test_symbols.py) | Test which of 469 symbols are valid | Local testing only (not deployed) |
+| [sanity_check.py](app/sanity_check.py) | End-to-end local validation | Local testing only (not deployed) |
+
+---
+
+## Testing
+
+### Local Testing
+```bash
+# Test symbol validation
+python -m app.test_symbols
+
+# Full sanity check (wipe, bootstrap, cold-start, verify)
+python -m app.sanity_check
+```
+
+### Sample Queries
+```bash
+# Get latest prices for top 5 symbols
+psql -U test -d test_db << EOF
+SELECT ticker, bid, ask, mid_price, price_updated_at 
+FROM instruments 
+WHERE bid IS NOT NULL 
+ORDER BY price_updated_at DESC 
+LIMIT 5;
+EOF
+
+# Get 30-day price history for AAPL
+psql -U test -d test_db << EOF
+SELECT timestamp, open, high, low, close, volume 
+FROM instrument_price_history 
+WHERE instrument_id = (SELECT instrument_id FROM instruments WHERE ticker = 'AAPL')
+ORDER BY timestamp DESC 
+LIMIT 30;
+EOF
+```
+
+---
+
+## Production Checklist
+
+- [ ] PostgreSQL 18 running on separate VM/container
+- [ ] Database credentials in .env (not committed)
+- [ ] Alpaca API credentials verified
+- [ ] Docker image built and tested locally
+- [ ] Schema loaded into production database
+- [ ] bootstrap_instruments.py run locally
+- [ ] cold_start_bars.py run locally
+- [ ] Service container started with docker-compose
+- [ ] Health endpoint returns "healthy"
+- [ ] Job 1 logging prices every 10 seconds
+- [ ] Job 3 scheduled for 16:15 ET (next trading day test)
+
+---
+
+## Support
+
+For detailed implementation notes, see [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md)
+
+Issues? Check:
+1. `.env` credentials (DB & Alpaca)
+2. PostgreSQL connection: `psql -h $DB_HOST -U $DB_USER -d $DB_NAME`
+3. Alpaca API key validity: `curl -H "APCA-API-KEY-ID: $KEY" https://paper-api.alpaca.markets/v1/account`
+4. Service logs: `docker logs ticker-service`

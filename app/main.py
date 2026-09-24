@@ -2,6 +2,7 @@
 import logging
 import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import JSONResponse
@@ -9,9 +10,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import db_manager
-from app.models import Base
+from app.models import Base, Instrument
 from app.services.alpaca_service import AlpacaService
 from app.services.price_service import PriceService
+from app.services.bars_service import BarsService
 from app.services.scheduler import initialize_scheduler, get_scheduler
 from app.health import HealthChecker
 
@@ -27,8 +29,40 @@ logger = logging.getLogger(__name__)
 # Global service instances
 alpaca_service: AlpacaService = None
 price_service: PriceService = None
+bars_service: BarsService = None
 health_checker: HealthChecker = None
 scheduler_manager = None
+all_symbols = []  # All 469 symbols from overlap.txt
+
+
+def load_symbols_from_overlap() -> list:
+    """Load symbols from overlap.txt file."""
+    try:
+        symbol_file = Path(__file__).parent.parent / "overlap.txt"
+        symbols = []
+        
+        with open(symbol_file, "r") as f:
+            for line in f:
+                line = line.strip()
+                # Skip header lines and empty lines
+                if (
+                    line
+                    and not line.startswith("OVERLAPPING")
+                    and not line.startswith("Generated")
+                    and not line.startswith("Total")
+                    and not line.startswith("=")
+                    and len(line) <= 10
+                ):
+                    symbols.append(line.upper())
+        
+        # Remove duplicates and sort
+        symbols = sorted(list(set(symbols)))
+        logger.info(f"Loaded {len(symbols)} symbols from overlap.txt")
+        return symbols
+        
+    except Exception as e:
+        logger.error(f"Failed to load symbols from overlap.txt: {e}")
+        return []
 
 
 @asynccontextmanager
@@ -36,7 +70,7 @@ async def lifespan(app: FastAPI):
     """
     Manage application startup and shutdown.
     """
-    global alpaca_service, price_service, health_checker, scheduler_manager
+    global alpaca_service, price_service, bars_service, health_checker, scheduler_manager, all_symbols
     
     logger.info("Starting Market Data Service...")
     
@@ -46,6 +80,20 @@ async def lifespan(app: FastAPI):
         logger.error("Failed to initialize database - service will not operate normally")
         sys.exit(1)
     
+    # Reset schema (drop and recreate tables) on startup
+    logger.info("Resetting database schema (dropping and recreating tables)")
+    if not db_manager.reset_schema():
+        logger.error("Failed to reset database schema")
+        sys.exit(1)
+    
+    # Load symbols from overlap.txt
+    all_symbols = load_symbols_from_overlap()
+    if not all_symbols:
+        logger.error("Failed to load symbols from overlap.txt")
+        sys.exit(1)
+    
+    logger.info(f"Loaded {len(all_symbols)} symbols for Job 1")
+    
     # Initialize services
     logger.info("Initializing Alpaca service")
     alpaca_service = AlpacaService()
@@ -53,12 +101,15 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing price service")
     price_service = PriceService(alpaca_service)
     
+    logger.info("Initializing bars service")
+    bars_service = BarsService(alpaca_service)
+    
     logger.info("Initializing health checker")
     health_checker = HealthChecker(alpaca_service, price_service)
     
-    # Initialize and start scheduler
-    logger.info("Initializing scheduler")
-    scheduler_manager = initialize_scheduler(price_service)
+    # Initialize and start scheduler with all symbols
+    logger.info("Initializing scheduler with all jobs")
+    scheduler_manager = initialize_scheduler(price_service, bars_service, all_symbols)
     
     if not scheduler_manager.start():
         logger.error("Failed to start scheduler - market data polling will not occur")

@@ -195,3 +195,64 @@ class AlpacaService:
         except (ValueError, KeyError, TypeError) as e:
             logger.error(f"Error parsing quote for {symbol}: {e}")
             return None
+
+    def get_bars(
+        self,
+        symbol: str,
+        start_date: str,
+        end_date: str,
+        timeframe: str = "1Day",
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch historical OHLC bars for a symbol.
+        
+        Note: On Basic plan, end_date must be at least 15 minutes in the past
+        and feed defaults to 'iex'.
+        
+        Args:
+            symbol: Ticker symbol
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+            timeframe: Bar timeframe (1Day, 1Hour, 15Min, etc.)
+            
+        Returns:
+            List of bar data with OHLCV
+            
+        Example:
+            [
+                {
+                    't': '2026-08-24T00:00:00Z',
+                    'o': 311.47,
+                    'h': 313.34,
+                    'l': 310.05,
+                    'c': 310.38,
+                    'v': 50000000
+                }
+            ]
+        """
+        try:
+            logger.debug(f"Fetching bars for {symbol} from {start_date} to {end_date}")
+            
+            params = {
+                "symbols": symbol,
+                "start": start_date,
+                "end": end_date,
+                "timeframe": timeframe,
+                "feed": "iex",  # Explicitly use IEX for Basic plan compatibility
+                "limit": 10000,
+            }
+            
+            response = self._make_request("/v2/stocks/bars", params=params)
+            
+            bars = []
+            if "bars" in response and symbol in response["bars"]:
+                bars = response["bars"][symbol]
+                logger.info(f"Successfully fetched {len(bars)} bars for {symbol}")
+            else:
+                logger.warning(f"No bars found in response for {symbol}")
+            
+            return bars
+            
+        except AlpacaMarketDataError as e:
+            logger.error(f"Failed to fetch bars for {symbol}: {e}")
+            raise

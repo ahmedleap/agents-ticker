@@ -40,11 +40,24 @@ env/
 .env.local
 .env.*.local
 
-# Testing
+# Testing (local development scripts - not for production)
 .pytest_cache/
 .coverage
 htmlcov/
 .tox/
+app/test_symbols.py
+app/sanity_check.py
+historical_chart_bars.py
+test_bars_api.py
+test_bars_curl.sh
+reset-and-setup.sh
+invalid_symbols.txt
+
+# Generated images and outputs
+*.png
+*.jpg
+*.jpeg
+*.svg
 
 # Database
 *.db

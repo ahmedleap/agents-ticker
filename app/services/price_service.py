@@ -3,6 +3,7 @@ import logging
 from datetime import datetime
 from decimal import Decimal
 from typing import List, Dict, Any, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from sqlalchemy.orm import Session
 
 from app.models import Instrument
@@ -281,3 +282,98 @@ class PriceService:
                 else 0
             ),
         }
+
+    def fetch_and_persist_prices_batch(
+        self,
+        symbols: List[str],
+        num_workers: int = 5,
+        batch_size: int = 100,
+    ) -> Dict[str, Any]:
+        """
+        Fetch prices for multiple symbols using threading (Job 1).
+        
+        Batches symbols into groups and uses ThreadPoolExecutor for parallel API calls.
+        
+        Args:
+            symbols: List of all ticker symbols to fetch
+            num_workers: Number of worker threads
+            batch_size: Symbols per API request (Alpaca allows up to 100)
+            
+        Returns:
+            Dictionary with aggregated results from all batches
+        """
+        result = {
+            "success": False,
+            "timestamp": datetime.utcnow(),
+            "total_symbols": len(symbols),
+            "prices_inserted": 0,
+            "batches_processed": 0,
+            "batches_failed": 0,
+            "errors": [],
+        }
+
+        if not symbols:
+            logger.warning("No symbols provided for batch price fetch")
+            return result
+
+        # Split symbols into batches
+        batches = [
+            symbols[i:i + batch_size]
+            for i in range(0, len(symbols), batch_size)
+        ]
+
+        logger.info(
+            f"Starting batch price fetch: {len(symbols)} symbols in {len(batches)} batches, "
+            f"{num_workers} workers"
+        )
+
+        total_inserted = 0
+        batches_failed = 0
+
+        # Use ThreadPoolExecutor for parallel batch processing
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            # Submit all batch jobs
+            future_to_batch = {
+                executor.submit(self.fetch_and_persist_prices, batch): i
+                for i, batch in enumerate(batches)
+            }
+
+            # Process completed batches
+            for future in as_completed(future_to_batch):
+                batch_idx = future_to_batch[future]
+                try:
+                    batch_result = future.result()
+                    total_inserted += batch_result.get("prices_inserted", 0)
+
+                    if batch_result.get("success"):
+                        logger.info(
+                            f"Batch {batch_idx + 1}/{len(batches)}: "
+                            f"Inserted {batch_result['prices_inserted']} prices"
+                        )
+                    else:
+                        batches_failed += 1
+                        if batch_result.get("errors"):
+                            result["errors"].extend(batch_result["errors"])
+                except Exception as e:
+                    logger.error(f"Error processing batch {batch_idx + 1}: {e}")
+                    batches_failed += 1
+                    result["errors"].append(f"Batch {batch_idx + 1} exception: {str(e)}")
+
+        result["prices_inserted"] = total_inserted
+        result["batches_processed"] = len(batches) - batches_failed
+        result["batches_failed"] = batches_failed
+        result["success"] = total_inserted > 0
+
+        logger.info(
+            f"Batch price fetch completed: "
+            f"{result['prices_inserted']} prices inserted from {result['batches_processed']} batches"
+        )
+
+        if result["success"]:
+            self.successful_fetches += 1
+            self.last_successful_fetch = result["timestamp"]
+            self.last_error = None
+        else:
+            self.failed_fetches += 1
+
+        return result

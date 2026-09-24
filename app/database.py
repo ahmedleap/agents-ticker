@@ -79,6 +79,53 @@ class DatabaseManager:
         finally:
             session.close()
 
+    def drop_all_tables(self) -> bool:
+        """
+        Drop all tables (for reset/testing).
+        Returns True if successful, False otherwise.
+        """
+        try:
+            from app.models import Base
+            logger.warning("Dropping all tables from database")
+            Base.metadata.drop_all(self.engine)
+            logger.info("All tables dropped successfully")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to drop tables: {e}")
+            return False
+
+    def create_all_tables(self) -> bool:
+        """
+        Create all tables from models.
+        Returns True if successful, False otherwise.
+        """
+        try:
+            from app.models import Base
+            logger.info("Creating all tables in database")
+            Base.metadata.create_all(self.engine)
+            logger.info("All tables created successfully")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to create tables: {e}")
+            return False
+
+    def reset_schema(self) -> bool:
+        """
+        Drop all tables and recreate them (full reset).
+        Returns True if successful, False otherwise.
+        """
+        try:
+            logger.warning("Resetting database schema (drop + create)")
+            if not self.drop_all_tables():
+                return False
+            if not self.create_all_tables():
+                return False
+            logger.info("Database schema reset completed successfully")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to reset schema: {e}")
+            return False
+
     def close(self):
         """Close database connection."""
         if self.engine:

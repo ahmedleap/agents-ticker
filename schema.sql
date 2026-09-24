@@ -226,3 +226,27 @@ CREATE INDEX idx_transactions_account_created ON transactions (account_id, creat
 
 CREATE INDEX idx_instruments_ticker ON instruments (ticker);
 CREATE INDEX idx_instruments_price_updated_at ON instruments (price_updated_at DESC);
+
+-- ============================================================
+-- INSTRUMENT PRICE HISTORY (daily OHLCV bars from Alpaca)
+-- ============================================================
+
+CREATE TABLE instrument_price_history (
+    price_history_id UUID PRIMARY KEY,
+    instrument_id    UUID NOT NULL,
+    timestamp        TIMESTAMP NOT NULL,
+    open             NUMERIC(18,4) NOT NULL CHECK (open > 0),
+    high             NUMERIC(18,4) NOT NULL CHECK (high > 0),
+    low              NUMERIC(18,4) NOT NULL CHECK (low > 0),
+    close            NUMERIC(18,4) NOT NULL CHECK (close > 0),
+    volume           INTEGER NOT NULL CHECK (volume >= 0),
+    CONSTRAINT fk_price_history_instrument
+        FOREIGN KEY (instrument_id)
+        REFERENCES instruments (instrument_id)
+        ON DELETE CASCADE,
+    CONSTRAINT uq_instrument_timestamp
+        UNIQUE (instrument_id, timestamp)
+);
+
+CREATE INDEX idx_price_history_instrument_timestamp 
+    ON instrument_price_history (instrument_id, timestamp DESC);
