@@ -1,7 +1,7 @@
 """Database connection and session management."""
 import logging
 from contextlib import contextmanager
-from sqlalchemy import create_engine, Engine, text
+from sqlalchemy import create_engine, Engine, text, inspect
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import QueuePool
 from app.config import settings

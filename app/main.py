@@ -85,27 +85,24 @@ def load_symbols_from_overlap() -> list:
 async def lifespan(app: FastAPI):
     """
     Manage application startup and shutdown.
+    Assumes database schema already exists.
     """
     global alpaca_service, price_service, bars_service, health_checker, scheduler_manager, all_symbols
     
     logger.info("Starting Market Data Service...")
     
-    # Initialize database
+    # Initialize database connection only
     logger.info("Initializing database connection")
     if not db_manager.initialize():
-        logger.error("Failed to initialize database - service will not operate normally")
+        logger.error("Failed to initialize database")
         sys.exit(1)
     
-    # Reset schema (drop and recreate tables) on startup
-    logger.info("Resetting database schema (dropping and recreating tables)")
-    if not db_manager.reset_schema():
-        logger.error("Failed to reset database schema")
-        sys.exit(1)
-    
-    # Load symbols from overlap.txt
+    # Load symbols from database (assume instruments table exists)
+    logger.info("Loading validated symbols from database")
     all_symbols = load_symbols_from_overlap()
     if not all_symbols:
-        logger.error("Failed to load symbols from overlap.txt")
+        logger.error("No symbols found in database")
+        logger.error("Run bootstrap_instruments.py and cold_start_bars.py first")
         sys.exit(1)
     
     logger.info(f"Loaded {len(all_symbols)} symbols for Job 1")

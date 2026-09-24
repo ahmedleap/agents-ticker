@@ -3,7 +3,7 @@ version: '3.8'
 services:
   ticker-service:
     build: .
-    image: ticker-service:0.3.2
+    image: ticker-service:0.3.3
     container_name: ticker-service
     ports:
       - "8000:8000"
