@@ -1,7 +1,7 @@
 # Multi-stage build for Market Data Service (Lean Production Image)
 
 # Build arguments
-ARG VERSION=0.3.6
+ARG VERSION=0.3.8
 
 # Stage 1: Builder
 FROM python:3.12-slim as builder
@@ -42,6 +42,9 @@ COPY --from=builder /opt/venv /opt/venv
 # Copy application code and symbol list
 COPY app ./app
 COPY overlap.txt ./
+
+# Install curl for health checks
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 
 # Set environment variables
 ENV PATH="/opt/venv/bin:$PATH"

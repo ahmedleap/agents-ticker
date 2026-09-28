@@ -181,7 +181,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.SERVICE_NAME,
     description="Market Data Service - Fetches market data from Alpaca and persists to PostgreSQL",
-    version="0.3.6",
+    version="0.3.8",
     lifespan=lifespan,
 )
 
