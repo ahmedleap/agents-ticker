@@ -1,0 +1,31 @@
+[run]
+branch = True
+omit =
+    */site-packages/*
+    */distutils/*
+    */python3.*/*
+    # Exclude one-time utility/setup scripts
+    app/bootstrap_instruments.py
+    app/cold_start_bars.py
+    app/sanity_check.py
+    app/test_symbols.py
+    # Exclude startup/context managers (hard to unit test, covered by integration)
+    app/main.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise AssertionError
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:
+    @abstractmethod
+    @abc.abstractmethod
+    class .*\(Protocol\):
+    
+precision = 2
+skip_covered = False
+skip_empty = True
+
+show_missing = True

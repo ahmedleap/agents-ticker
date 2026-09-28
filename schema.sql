@@ -123,7 +123,7 @@ CREATE TABLE instruments (
     bid              NUMERIC(18,4) CHECK (bid > 0),
     ask              NUMERIC(18,4) CHECK (ask > 0),
     mid_price        NUMERIC(18,4) GENERATED ALWAYS AS ((bid + ask) / 2) STORED,
-    price_updated_at TIMESTAMP
+    price_updated_at TIMESTAMP WITH TIME ZONE
 );
 
 -- ============================================================
@@ -234,7 +234,7 @@ CREATE INDEX idx_instruments_price_updated_at ON instruments (price_updated_at D
 CREATE TABLE instrument_price_history (
     price_history_id UUID PRIMARY KEY,
     instrument_id    UUID NOT NULL,
-    timestamp        TIMESTAMP NOT NULL,
+    timestamp        TIMESTAMP WITH TIME ZONE NOT NULL,
     open             NUMERIC(18,4) NOT NULL CHECK (open > 0),
     high             NUMERIC(18,4) NOT NULL CHECK (high > 0),
     low              NUMERIC(18,4) NOT NULL CHECK (low > 0),

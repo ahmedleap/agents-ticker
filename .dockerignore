@@ -1,0 +1,48 @@
+# Test files and directories
+tests/
+requirements-test.txt
+pytest.ini
+.coveragerc
+conftest.py
+
+# Development files
+.pytest_cache/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Git and version control
+.git/
+.gitignore
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# Documentation and notes
+*.md
+docs/
+ARTIFACTS.md
+BUILD_SUMMARY.md
+GETTING_STARTED.md
+INDEX.md
+PROJECT_STRUCTURE.md
+QUICK_REFERENCE.md
+
+# Development scripts and data
+quick-start.sh
+build.sh
+validate.sh
+sample_data.sql
+schema.sql
+migrations/
+docker-compose.override.yml.example
+db.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
