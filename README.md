@@ -2,9 +2,10 @@
 
 Real-time market data collection and persistence service using Alpaca API and PostgreSQL.
 
-**Version:** 0.3.5  
+**Version:** 0.3.6  
 **Status:** Production Ready ✅  
-**Coverage:** 81.88% (96 tests passing)
+**Coverage:** 81.88% (96 tests passing)  
+**Latest:** Timezone-aware UTC timestamps (Python 3.12+ compatible)
 
 ## Quick Start
 

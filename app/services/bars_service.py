@@ -1,6 +1,6 @@
 """Bars service for historical price data management."""
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
@@ -86,7 +86,7 @@ class BarsService:
 
         try:
             # Calculate date range (exclude last 15 minutes for Basic plan)
-            now_utc = datetime.utcnow()
+            now_utc = datetime.now(timezone.utc)
             end_date = (now_utc - timedelta(minutes=15)).date()
             start_date = end_date - timedelta(days=days)
 
@@ -182,7 +182,7 @@ class BarsService:
         try:
             # Calculate date range for previous trading day
             # Account for 15-minute delay requirement
-            now_utc = datetime.utcnow()
+            now_utc = datetime.now(timezone.utc)
             end_date = (now_utc - timedelta(minutes=15)).date()
             start_date = end_date - timedelta(days=days_back)
 

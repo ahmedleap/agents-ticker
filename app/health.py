@@ -1,6 +1,6 @@
 """Health check and status endpoints."""
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
 from app.config import settings
@@ -36,7 +36,7 @@ class HealthChecker:
         
         return {
             "status": overall_status,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "database": db_status,
             "alpaca": alpaca_status,
             "service_name": settings.SERVICE_NAME,
@@ -54,7 +54,7 @@ class HealthChecker:
         
         return {
             "service": settings.SERVICE_NAME,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "status": "operational" if db_manager.is_connected else "unavailable",
             "last_successful_fetch": price_stats["last_successful_fetch"],
             "last_error": price_stats["last_error"],

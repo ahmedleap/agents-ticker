@@ -1,6 +1,6 @@
 """Additional integration and edge case tests."""
 import pytest
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from unittest.mock import Mock, patch, MagicMock
 from requests.exceptions import ConnectionError, Timeout

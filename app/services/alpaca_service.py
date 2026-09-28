@@ -1,7 +1,7 @@
 """Alpaca API integration for market data retrieval."""
 import logging
 from typing import Optional, Dict, List, Any
-from datetime import datetime
+from datetime import datetime, timezone
 import requests
 from requests.exceptions import RequestException, Timeout, ConnectionError
 from app.config import settings
@@ -178,7 +178,7 @@ class AlpacaService:
                     "ask": float(quote_data.get("ap", 0)),
                     "bid_size": int(quote_data.get("bs", 0)),
                     "ask_size": int(quote_data.get("as", 0)),
-                    "timestamp": quote_data.get("t", datetime.utcnow().isoformat()),
+                    "timestamp": quote_data.get("t", datetime.now(timezone.utc).isoformat()),
                 }
             # Fallback for different API versions
             elif "bidprice" in quote_data and "askprice" in quote_data:
@@ -186,7 +186,7 @@ class AlpacaService:
                     "symbol": symbol,
                     "bid": float(quote_data.get("bidprice", 0)),
                     "ask": float(quote_data.get("askprice", 0)),
-                    "timestamp": quote_data.get("timestamp", datetime.utcnow().isoformat()),
+                    "timestamp": quote_data.get("timestamp", datetime.now(timezone.utc).isoformat()),
                 }
             else:
                 logger.warning(f"Unknown quote format for {symbol}: {quote_data}")

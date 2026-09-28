@@ -1,6 +1,6 @@
 """Price service for fetching, transforming, and persisting market data."""
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import List, Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -103,7 +103,7 @@ class PriceService:
         """
         result = {
             "success": False,
-            "timestamp": datetime.utcnow(),
+            "timestamp": datetime.now(timezone.utc),
             "symbols_requested": len(symbols),
             "prices_inserted": 0,
             "errors": [],
@@ -163,12 +163,12 @@ class PriceService:
                         try:
                             timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
                         except (ValueError, AttributeError):
-                            timestamp = datetime.utcnow()
+                            timestamp = datetime.now(timezone.utc)
                     else:
-                        timestamp = datetime.utcnow()
+                        timestamp = datetime.now(timezone.utc)
                 except Exception as e:
                     logger.warning(f"Error parsing timestamp for {symbol}: {e}")
-                    timestamp = datetime.utcnow()
+                    timestamp = datetime.now(timezone.utc)
                 
                 prices_to_insert.append({
                     "symbol": symbol,
@@ -304,7 +304,7 @@ class PriceService:
         """
         result = {
             "success": False,
-            "timestamp": datetime.utcnow(),
+            "timestamp": datetime.now(timezone.utc),
             "total_symbols": len(symbols),
             "prices_inserted": 0,
             "batches_processed": 0,

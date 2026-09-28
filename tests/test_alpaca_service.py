@@ -1,6 +1,6 @@
 """Tests for AlpacaService."""
 import pytest
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import Mock, patch, MagicMock
 import responses
 

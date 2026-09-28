@@ -10,7 +10,7 @@ Usage:
 
 import logging
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.config import settings
 from app.database import db_manager
@@ -42,7 +42,7 @@ def cold_start_bars(days: int = 365) -> dict:
         "bars_inserted": 0,
         "invalid_symbols": [],
         "errors": [],
-        "start_time": datetime.utcnow(),
+        "start_time": datetime.now(timezone.utc),
     }
 
     try:
@@ -90,7 +90,7 @@ def cold_start_bars(days: int = 365) -> dict:
         # Get invalid symbols from bars service
         result["invalid_symbols"] = bars_service.get_invalid_symbols()
 
-        result["end_time"] = datetime.utcnow()
+        result["end_time"] = datetime.now(timezone.utc)
         duration = (result["end_time"] - result["start_time"]).total_seconds()
         result["duration_seconds"] = duration
 

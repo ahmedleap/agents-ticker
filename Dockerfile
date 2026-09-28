@@ -1,7 +1,7 @@
 # Multi-stage build for Market Data Service (Lean Production Image)
 
 # Build arguments
-ARG VERSION=0.3.5
+ARG VERSION=0.3.6
 
 # Stage 1: Builder
 FROM python:3.12-slim as builder
@@ -32,7 +32,7 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # Build arguments available in runtime stage
-ARG VERSION=0.3.5
+ARG VERSION=0.3.6
 LABEL version="${VERSION}"
 LABEL description="Market Data Service - Timezone-aware, bootstrap integrated"
 
