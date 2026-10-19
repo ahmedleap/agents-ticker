@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Instrument, InstrumentPriceHistory
 from app.services.alpaca_service import AlpacaService, AlpacaMarketDataError
+from app.services.forex_service import ForexService, ForexMarketDataError
 from app.database import db_manager
 
 logger = logging.getLogger(__name__)
@@ -15,9 +16,24 @@ logger = logging.getLogger(__name__)
 class BarsService:
     """Service for managing historical OHLC price data."""
 
-    def __init__(self, alpaca_service: AlpacaService):
+    def __init__(self, alpaca_service: AlpacaService, forex_service: ForexService | None = None):
         self.alpaca = alpaca_service
+        self.forex = forex_service or ForexService()
         self.invalid_symbols: List[str] = []
+
+    def _get_bars(
+        self,
+        asset_class: str,
+        symbol: str,
+        start_date: str,
+        end_date: str,
+    ) -> List[Dict[str, Any]]:
+        """Route historical-bar requests to the correct provider."""
+        if asset_class == "CRYPTO":
+            return self.alpaca.get_crypto_bars(symbol, start_date, end_date)
+        if asset_class == "FOREX":
+            return self.forex.get_historical_bars(symbol, start_date, end_date)
+        return self.alpaca.get_bars(symbol, start_date, end_date)
 
     def persist_bar(
         self,
@@ -103,16 +119,18 @@ class BarsService:
                     return result
 
                 instrument_id = instrument.instrument_id
+                asset_class = getattr(instrument, "asset_class", "STOCK")
 
             # Fetch bars from Alpaca
             try:
-                bars = self.alpaca.get_bars(
+                bars = self._get_bars(
+                    asset_class,
                     symbol,
                     start_date.isoformat(),
                     end_date.isoformat(),
                 )
-            except AlpacaMarketDataError as e:
-                msg = f"Alpaca API error for {symbol}: {e}"
+            except (AlpacaMarketDataError, ForexMarketDataError) as e:
+                msg = f"Market-data API error for {symbol}: {e}"
                 logger.error(msg)
                 result["errors"].append(msg)
                 self.invalid_symbols.append(symbol)
@@ -198,16 +216,18 @@ class BarsService:
                     return result
 
                 instrument_id = instrument.instrument_id
+                asset_class = getattr(instrument, "asset_class", "STOCK")
 
             # Fetch bar from Alpaca
             try:
-                bars = self.alpaca.get_bars(
+                bars = self._get_bars(
+                    asset_class,
                     symbol,
                     start_date.isoformat(),
                     end_date.isoformat(),
                 )
-            except AlpacaMarketDataError as e:
-                msg = f"Alpaca API error for {symbol}: {e}"
+            except (AlpacaMarketDataError, ForexMarketDataError) as e:
+                msg = f"Market-data API error for {symbol}: {e}"
                 logger.error(msg)
                 result["errors"].append(msg)
                 return result

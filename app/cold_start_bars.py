@@ -17,6 +17,7 @@ from app.database import db_manager
 from app.models import Instrument
 from app.services.alpaca_service import AlpacaService
 from app.services.bars_service import BarsService
+from app.services.forex_service import ForexService
 
 logging.basicConfig(
     level=logging.INFO,
@@ -49,11 +50,7 @@ def cold_start_bars(days: int = 365) -> dict:
         # Get all instruments
         with db_manager.session_scope() as session:
             instruments = session.query(Instrument).order_by(Instrument.ticker).all()
-            symbols = [
-                (i.instrument_id, i.ticker)
-                for i in instruments
-                if getattr(i, "asset_class", "STOCK") == "STOCK"
-            ]
+            symbols = [(i.instrument_id, i.ticker) for i in instruments]
             result["total_symbols"] = len(symbols)
 
         if not symbols:
@@ -64,7 +61,7 @@ def cold_start_bars(days: int = 365) -> dict:
 
         # Initialize services
         alpaca_service = AlpacaService()
-        bars_service = BarsService(alpaca_service)
+        bars_service = BarsService(alpaca_service, ForexService())
 
         # Process each symbol
         for idx, (instrument_id, symbol) in enumerate(symbols, 1):

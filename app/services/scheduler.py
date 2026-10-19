@@ -50,10 +50,12 @@ class SchedulerManager:
         all_symbols: List[str],
         forex_service: Optional[ForexService] = None,
         crypto_symbols: Optional[List[str]] = None,
+        eod_symbols: Optional[List[str]] = None,
     ):
         self.price_service = price_service
         self.bars_service = bars_service
         self.all_symbols = all_symbols
+        self.eod_symbols = all_symbols if eod_symbols is None else eod_symbols
         self.forex_service = forex_service or ForexService()
         self.crypto_symbols = crypto_symbols or settings.crypto_symbols_list
         self.scheduler: Optional[BackgroundScheduler] = None
@@ -219,14 +221,14 @@ class SchedulerManager:
         Executes at 4:15 PM ET every weekday (market closes at 4:00 PM ET).
         Fetches the previous day's bar for each symbol and inserts into database.
         """
-        logger.info(f"Job 3 triggered: Loading EOD bars for {len(self.all_symbols)} symbols")
+        logger.info(f"Job 3 triggered: Loading EOD bars for {len(self.eod_symbols)} symbols")
         
         total_success = 0
         total_failed = 0
         errors = []
         
         try:
-            for idx, symbol in enumerate(self.all_symbols, 1):
+            for idx, symbol in enumerate(self.eod_symbols, 1):
                 try:
                     result = self.bars_service.load_eod_bar(symbol, days_back=1)
                     
@@ -240,7 +242,7 @@ class SchedulerManager:
                     # Log progress every 50 symbols
                     if idx % 50 == 0:
                         logger.info(
-                            f"Job 3 progress: {idx}/{len(self.all_symbols)} "
+                            f"Job 3 progress: {idx}/{len(self.eod_symbols)} "
                             f"({total_success} success, {total_failed} failed)"
                         )
                         
@@ -328,6 +330,7 @@ def initialize_scheduler(
     all_symbols: List[str],
     forex_service: Optional[ForexService] = None,
     crypto_symbols: Optional[List[str]] = None,
+    eod_symbols: Optional[List[str]] = None,
 ) -> SchedulerManager:
     """Initialize and return the global scheduler manager."""
     global _scheduler_manager
@@ -337,6 +340,7 @@ def initialize_scheduler(
         all_symbols,
         forex_service,
         crypto_symbols,
+        eod_symbols,
     )
     return _scheduler_manager
 

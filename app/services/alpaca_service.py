@@ -279,3 +279,31 @@ class AlpacaService:
         except AlpacaMarketDataError as e:
             logger.error(f"Failed to fetch bars for {symbol}: {e}")
             raise
+
+    def get_crypto_bars(
+        self,
+        symbol: str,
+        start_date: str,
+        end_date: str,
+        timeframe: str = "1Day",
+    ) -> List[Dict[str, Any]]:
+        """Fetch historical daily bars for a crypto/USD pair."""
+        provider_symbol = symbol if "/" in symbol else f"{symbol.upper()}/USD"
+        params = {
+            "symbols": provider_symbol,
+            "start": start_date,
+            "end": end_date,
+            "timeframe": timeframe,
+            "limit": 10000,
+        }
+        if self.crypto_feed:
+            params["feed"] = self.crypto_feed
+
+        try:
+            response = self._make_request("/v1beta3/crypto/us/bars", params=params)
+            bars = response.get("bars", {}).get(provider_symbol, [])
+            logger.info("Successfully fetched %s crypto bars for %s", len(bars), symbol)
+            return bars
+        except AlpacaMarketDataError as exc:
+            logger.error("Failed to fetch crypto bars for %s: %s", symbol, exc)
+            raise

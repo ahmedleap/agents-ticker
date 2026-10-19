@@ -158,6 +158,12 @@ async def lifespan(app: FastAPI):
         sys.exit(1)
     
     logger.info(f"Loaded {len(all_symbols)} symbols for Job 1")
+
+    with db_manager.session_scope() as session:
+        eod_symbols = sorted(
+            row[0].upper()
+            for row in session.query(Instrument.ticker).all()
+        )
     
     # Initialize services
     logger.info("Initializing Alpaca service")
@@ -167,7 +173,7 @@ async def lifespan(app: FastAPI):
     price_service = PriceService(alpaca_service)
     
     logger.info("Initializing bars service")
-    bars_service = BarsService(alpaca_service)
+    bars_service = BarsService(alpaca_service, ForexService())
     
     logger.info("Initializing health checker")
     health_checker = HealthChecker(alpaca_service, price_service)
@@ -180,6 +186,7 @@ async def lifespan(app: FastAPI):
         all_symbols,
         ForexService(),
         settings.crypto_symbols_list,
+        eod_symbols,
     )
     
     if not scheduler_manager.start():
