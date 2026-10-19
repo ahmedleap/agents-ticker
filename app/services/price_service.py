@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import List, Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from requests.exceptions import Timeout
 from sqlalchemy.orm import Session
 
 from app.models import Instrument
@@ -25,7 +26,12 @@ class PriceService:
         self.failed_fetches: int = 0
         self.total_prices_inserted: int = 0
 
-    def get_or_create_instrument(self, session: Session, symbol: str) -> Instrument:
+    def get_or_create_instrument(
+        self,
+        session: Session,
+        symbol: str,
+        asset_class: str = "STOCK",
+    ) -> Instrument:
         """
         Get existing instrument or create a new one.
         
@@ -43,7 +49,7 @@ class PriceService:
             instrument = Instrument(
                 ticker=symbol,
                 name=symbol,  # Use symbol as placeholder; could be enhanced
-                asset_class="STOCK",
+                asset_class=asset_class,
             )
             session.add(instrument)
             session.flush()  # Get the ID without committing
@@ -57,6 +63,7 @@ class PriceService:
         bid_price: float,
         ask_price: float,
         timestamp: datetime,
+        asset_class: str = "STOCK",
     ) -> bool:
         """
         Update instrument with latest bid/ask prices.
@@ -72,7 +79,7 @@ class PriceService:
             True if successful, False otherwise
         """
         try:
-            instrument = self.get_or_create_instrument(session, symbol)
+            instrument = self.get_or_create_instrument(session, symbol, asset_class)
             
             # Update bid/ask directly on instrument (mid_price is computed by database)
             instrument.bid = Decimal(str(bid_price))
@@ -91,7 +98,12 @@ class PriceService:
             logger.error(f"Error persisting price for {symbol}: {e}")
             return False
 
-    def fetch_and_persist_prices(self, symbols: List[str]) -> Dict[str, Any]:
+    def fetch_and_persist_prices(
+        self,
+        symbols: List[str],
+        asset_class: str = "STOCK",
+        quote_fetcher=None,
+    ) -> Dict[str, Any]:
         """
         Fetch prices from Alpaca and persist to database.
         
@@ -114,8 +126,9 @@ class PriceService:
         logger.info(f"Starting price fetch for {len(symbols)} symbols: {symbols}")
         
         try:
-            # Fetch quotes from Alpaca
-            quotes = self.alpaca.get_latest_quotes(symbols)
+            # Fetch quotes from the provider selected by the caller.
+            fetcher = quote_fetcher or self.alpaca.get_latest_quotes
+            quotes = fetcher(symbols)
             
             if not quotes:
                 logger.warning("No quotes returned from Alpaca")
@@ -158,7 +171,9 @@ class PriceService:
                 
                 # Parse timestamp
                 try:
-                    if isinstance(timestamp_str, str):
+                    if isinstance(timestamp_str, datetime):
+                        timestamp = timestamp_str
+                    elif isinstance(timestamp_str, str):
                         # Try ISO format first
                         try:
                             timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
@@ -188,6 +203,7 @@ class PriceService:
                             price_data["bid"],
                             price_data["ask"],
                             price_data["timestamp"],
+                            asset_class,
                         ):
                             inserted_count += 1
                     
@@ -220,12 +236,60 @@ class PriceService:
             self.failed_fetches += 1
             self.last_error = str(e)
             return result
-            
+
+        except Timeout as e:
+            logger.error(f"Provider timeout during fetch: {e}")
+            result["errors"].append(f"Provider timeout: {str(e)}")
+            self.failed_fetches += 1
+            self.last_error = str(e)
+            return result
+
         except AlpacaMarketDataError as e:
             logger.error(f"Alpaca API error: {e}")
             result["errors"].append(f"Alpaca error: {str(e)}")
             self.failed_fetches += 1
             self.last_error = str(e)
+            return result
+
+    def fetch_and_persist_crypto_prices(self, symbols: List[str]) -> Dict[str, Any]:
+        """Fetch and persist Alpaca crypto quotes."""
+        return self.fetch_and_persist_prices(
+            symbols,
+            asset_class="CRYPTO",
+            quote_fetcher=self.alpaca.get_latest_crypto_quotes,
+        )
+
+    def fetch_and_persist_forex_quotes(self, quotes: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+        """Persist already-normalized Frankfurter directed quotes."""
+        result = {
+            "success": False,
+            "timestamp": datetime.now(timezone.utc),
+            "symbols_requested": len(quotes),
+            "prices_inserted": 0,
+            "errors": [],
+        }
+        try:
+            with db_manager.session_scope() as session:
+                for symbol, quote in quotes.items():
+                    bid = quote.get("bid")
+                    ask = quote.get("ask")
+                    if bid is None or ask is None or bid <= 0 or ask < bid:
+                        result["errors"].append(f"Invalid FX quote for {symbol}")
+                        continue
+                    timestamp = quote.get("timestamp") or result["timestamp"]
+                    if self.persist_price(
+                        session, symbol, bid, ask, timestamp, "FOREX"
+                    ):
+                        result["prices_inserted"] += 1
+                session.commit()
+            result["success"] = result["prices_inserted"] > 0
+            if result["success"]:
+                self.total_prices_inserted += result["prices_inserted"]
+                self.last_successful_fetch = result["timestamp"]
+            return result
+        except Exception as exc:
+            logger.error("Error persisting FX quotes: %s", exc, exc_info=True)
+            result["errors"].append(str(exc))
             return result
             
         except Exception as e:

@@ -27,6 +27,7 @@ class AlpacaService:
         self.secret_key = settings.ALPACA_SECRET_KEY
         self.data_url = settings.ALPACA_DATA_URL
         self.feed = settings.ALPACA_FEED
+        self.crypto_feed = settings.ALPACA_CRYPTO_FEED
         self.timeout = settings.REQUEST_TIMEOUT_SECONDS
         self.headers = {
             "APCA-API-KEY-ID": self.api_key,
@@ -129,6 +130,28 @@ class AlpacaService:
         except AlpacaMarketDataError as e:
             logger.error(f"Failed to fetch quotes: {e}")
             raise
+
+    def get_latest_crypto_quotes(self, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
+        """Fetch latest crypto quotes and expose them under compact symbols."""
+        if not symbols:
+            logger.warning("No crypto symbols provided for quote request")
+            return {}
+
+        provider_symbols = [f"{symbol.upper()}/USD" for symbol in symbols]
+        params = {"symbols": ",".join(provider_symbols)}
+        if self.crypto_feed:
+            params["feed"] = self.crypto_feed
+
+        response = self._make_request("/v1beta3/crypto/us/latest/quotes", params=params)
+        raw_quotes = response.get("quotes", {})
+        quotes = {}
+        for symbol in symbols:
+            provider_symbol = f"{symbol.upper()}/USD"
+            quote = raw_quotes.get(provider_symbol) or raw_quotes.get(symbol.upper())
+            if quote is not None:
+                quotes[symbol.upper()] = quote
+        logger.info("Successfully fetched %s crypto quotes from Alpaca", len(quotes))
+        return quotes
 
     def health_check(self) -> bool:
         """

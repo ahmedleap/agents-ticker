@@ -11,6 +11,7 @@ from app.config import settings
 from app.services.alpaca_service import AlpacaService
 from app.services.price_service import PriceService
 from app.services.bars_service import BarsService
+from app.services.forex_service import ForexService
 from app.database import db_manager
 from app.models import Instrument
 
@@ -42,12 +43,23 @@ def is_market_open() -> bool:
 class SchedulerManager:
     """Manages scheduled polling of market data with threading support."""
 
-    def __init__(self, price_service: PriceService, bars_service: BarsService, all_symbols: List[str]):
+    def __init__(
+        self,
+        price_service: PriceService,
+        bars_service: BarsService,
+        all_symbols: List[str],
+        forex_service: Optional[ForexService] = None,
+        crypto_symbols: Optional[List[str]] = None,
+    ):
         self.price_service = price_service
         self.bars_service = bars_service
-        self.all_symbols = all_symbols  # All validated symbols from instruments table for Job 1
+        self.all_symbols = all_symbols
+        self.forex_service = forex_service or ForexService()
+        self.crypto_symbols = crypto_symbols or settings.crypto_symbols_list
         self.scheduler: Optional[BackgroundScheduler] = None
         self.poll_job: Optional[Job] = None
+        self.forex_job: Optional[Job] = None
+        self.crypto_job: Optional[Job] = None
         self.eod_job: Optional[Job] = None
         self.is_running = False
 
@@ -102,11 +114,39 @@ class SchedulerManager:
             )
             
             logger.info("Job 3 scheduled: 16:15 ET (4:15 PM, 15 min after market close) Mon-Fri")
+
+            if settings.FOREX_ENABLED:
+                self.forex_job = self.scheduler.add_job(
+                    func=self._poll_forex,
+                    trigger=CronTrigger(
+                        second=self._offset_seconds(settings.FOREX_OFFSET_SECOND),
+                        timezone="America/New_York",
+                    ),
+                    id="forex_poll_job",
+                    name="FX: Frankfurter Poll (10s offset)",
+                    replace_existing=True,
+                    max_instances=1,
+                    coalesce=True,
+                )
+
+            if settings.CRYPTO_ENABLED and self.crypto_symbols:
+                self.crypto_job = self.scheduler.add_job(
+                    func=self._poll_crypto,
+                    trigger=CronTrigger(
+                        second=self._offset_seconds(settings.CRYPTO_OFFSET_SECOND),
+                        timezone="America/New_York",
+                    ),
+                    id="crypto_poll_job",
+                    name="Crypto: Alpaca Poll (10s offset)",
+                    replace_existing=True,
+                    max_instances=1,
+                    coalesce=True,
+                )
             
             self.scheduler.start()
             self.is_running = True
             
-            logger.info("Scheduler started successfully with 2 jobs")
+            logger.info("Scheduler started successfully with %s jobs", len(self.scheduler.get_jobs()))
             
             return True
             
@@ -125,6 +165,11 @@ class SchedulerManager:
                 logger.info("Scheduler stopped")
         except Exception as e:
             logger.error(f"Error stopping scheduler: {e}")
+
+    @staticmethod
+    def _offset_seconds(offset: int) -> str:
+        """Build a wall-clock-aligned ten-second cron field."""
+        return ",".join(str((offset + step) % 60) for step in range(0, 60, 10))
 
     def _poll_market_data_threaded(self):
         """
@@ -214,6 +259,31 @@ class SchedulerManager:
         except Exception as e:
             logger.error(f"Job 3 fatal error: {e}", exc_info=True)
 
+    def _poll_forex(self):
+        """Fetch and persist all directed configured FX rates."""
+        try:
+            quotes = self.forex_service.get_quotes(settings.forex_currencies_list)
+            result = self.price_service.fetch_and_persist_forex_quotes(quotes)
+            logger.info(
+                "FX poll completed: requested=%s inserted=%s",
+                result.get("symbols_requested", 0),
+                result.get("prices_inserted", 0),
+            )
+        except Exception as exc:
+            logger.error("FX poll failed: %s", exc, exc_info=True)
+
+    def _poll_crypto(self):
+        """Fetch and persist crypto quotes without stock-market gating."""
+        try:
+            result = self.price_service.fetch_and_persist_crypto_prices(self.crypto_symbols)
+            logger.info(
+                "Crypto poll completed: requested=%s inserted=%s",
+                result.get("symbols_requested", len(self.crypto_symbols)),
+                result.get("prices_inserted", 0),
+            )
+        except Exception as exc:
+            logger.error("Crypto poll failed: %s", exc, exc_info=True)
+
     def get_status(self) -> dict:
         """Get scheduler status."""
         return {
@@ -236,6 +306,14 @@ class SchedulerManager:
                     else None
                 ),
             },
+            "forex_job": {
+                "name": self.forex_job.name if self.forex_job else None,
+                "next_run": self.forex_job.next_run_time.isoformat() if self.forex_job and self.forex_job.next_run_time else None,
+            },
+            "crypto_job": {
+                "name": self.crypto_job.name if self.crypto_job else None,
+                "next_run": self.crypto_job.next_run_time.isoformat() if self.crypto_job and self.crypto_job.next_run_time else None,
+            },
             "job_count": len(self.scheduler.get_jobs()) if self.scheduler else 0,
         }
 
@@ -248,10 +326,18 @@ def initialize_scheduler(
     price_service: PriceService,
     bars_service: BarsService,
     all_symbols: List[str],
+    forex_service: Optional[ForexService] = None,
+    crypto_symbols: Optional[List[str]] = None,
 ) -> SchedulerManager:
     """Initialize and return the global scheduler manager."""
     global _scheduler_manager
-    _scheduler_manager = SchedulerManager(price_service, bars_service, all_symbols)
+    _scheduler_manager = SchedulerManager(
+        price_service,
+        bars_service,
+        all_symbols,
+        forex_service,
+        crypto_symbols,
+    )
     return _scheduler_manager
 
 

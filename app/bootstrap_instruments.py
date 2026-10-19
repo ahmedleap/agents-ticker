@@ -14,6 +14,7 @@ from app.config import settings
 from app.database import db_manager
 from app.models import Instrument
 from app.services.alpaca_service import AlpacaService
+from app.services.forex_service import ForexService
 
 logging.basicConfig(
     level=logging.INFO,
@@ -142,6 +143,50 @@ def bootstrap_instruments(symbols: list) -> dict:
         f"{len(result['invalid'])} invalid"
     )
 
+    return result
+
+
+def bootstrap_non_stock_instruments() -> dict:
+    """Create configured FX and crypto instruments without stock validation."""
+    currencies = settings.forex_currencies_list if settings.FOREX_ENABLED else []
+    fx_symbols = [
+        f"{base}{quote}"
+        for base, quote in ForexService.directed_pairs(currencies)
+    ]
+    crypto_symbols = settings.crypto_symbols_list if settings.CRYPTO_ENABLED else []
+    instruments = [(symbol, "FOREX") for symbol in fx_symbols]
+    instruments.extend((symbol, "CRYPTO") for symbol in crypto_symbols)
+    result = {"created": 0, "already_exist": 0, "errors": []}
+
+    with db_manager.session_scope() as session:
+        for symbol, asset_class in instruments:
+            try:
+                existing = session.query(Instrument).filter_by(ticker=symbol).first()
+                if existing:
+                    if existing.asset_class != asset_class:
+                        result["errors"].append(
+                            f"{symbol}: existing asset class is {existing.asset_class}, expected {asset_class}"
+                        )
+                    else:
+                        result["already_exist"] += 1
+                    continue
+                session.add(
+                    Instrument(
+                        ticker=symbol,
+                        name=symbol,
+                        asset_class=asset_class,
+                    )
+                )
+                result["created"] += 1
+            except Exception as exc:
+                result["errors"].append(f"{symbol}: {exc}")
+        session.commit()
+
+    logger.info(
+        "Non-stock bootstrap complete: %s created, %s already exist",
+        result["created"],
+        result["already_exist"],
+    )
     return result
 
 

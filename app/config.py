@@ -33,6 +33,24 @@ class Settings(BaseSettings):
     # - sip: Real-time all exchanges, requires paid unlimited subscription
     # See: https://docs.alpaca.markets/us/reference/stocklatestquotes-1#query-params-feed
     ALPACA_FEED: str = os.getenv("ALPACA_FEED", "delayed_sip")
+    ALPACA_CRYPTO_FEED: str = os.getenv("ALPACA_CRYPTO_FEED", "")
+
+    # Forex Configuration
+    FRANKFURTER_URL: str = os.getenv(
+        "FRANKFURTER_URL", "https://api.frankfurter.dev/v2/rates"
+    )
+    FOREX_CURRENCIES: str = os.getenv(
+        "FOREX_CURRENCIES", "USD,CAD,EUR,JPY,CNY"
+    )
+    FOREX_ENABLED: bool = os.getenv("FOREX_ENABLED", "true").lower() == "true"
+    FOREX_OFFSET_SECOND: int = int(os.getenv("FOREX_OFFSET_SECOND", "3"))
+
+    # Crypto Configuration
+    CRYPTO_SYMBOLS: str = os.getenv(
+        "CRYPTO_SYMBOLS", "BTC,ETH,SOL,XRP,USDT,USDC,BNB"
+    )
+    CRYPTO_ENABLED: bool = os.getenv("CRYPTO_ENABLED", "true").lower() == "true"
+    CRYPTO_OFFSET_SECOND: int = int(os.getenv("CRYPTO_OFFSET_SECOND", "8"))
 
     # Polling Configuration
     POLL_INTERVAL_SECONDS: int = 10
@@ -63,6 +81,16 @@ class Settings(BaseSettings):
     def symbols_list(self) -> list[str]:
         """Parse tracked symbols from configuration."""
         return [s.strip().upper() for s in self.TRACKED_SYMBOLS.split(",") if s.strip()]
+
+    @property
+    def forex_currencies_list(self) -> list[str]:
+        """Return the configured unique currency codes."""
+        return sorted({s.strip().upper() for s in self.FOREX_CURRENCIES.split(",") if s.strip()})
+
+    @property
+    def crypto_symbols_list(self) -> list[str]:
+        """Return configured crypto base symbols."""
+        return [s.strip().upper() for s in self.CRYPTO_SYMBOLS.split(",") if s.strip()]
 
 
 # Global settings instance

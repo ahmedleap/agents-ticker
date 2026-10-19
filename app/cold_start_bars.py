@@ -49,7 +49,11 @@ def cold_start_bars(days: int = 365) -> dict:
         # Get all instruments
         with db_manager.session_scope() as session:
             instruments = session.query(Instrument).order_by(Instrument.ticker).all()
-            symbols = [(i.instrument_id, i.ticker) for i in instruments]
+            symbols = [
+                (i.instrument_id, i.ticker)
+                for i in instruments
+                if getattr(i, "asset_class", "STOCK") == "STOCK"
+            ]
             result["total_symbols"] = len(symbols)
 
         if not symbols:

@@ -15,7 +15,12 @@ from app.services.price_service import PriceService
 from app.services.bars_service import BarsService
 from app.services.scheduler import initialize_scheduler, get_scheduler
 from app.health import HealthChecker
-from app.bootstrap_instruments import load_symbols_from_file, bootstrap_instruments
+from app.bootstrap_instruments import (
+    load_symbols_from_file,
+    bootstrap_instruments,
+    bootstrap_non_stock_instruments,
+)
+from app.services.forex_service import ForexService
 
 # Configure logging
 logging.basicConfig(
@@ -45,7 +50,9 @@ def load_symbols_from_overlap() -> list:
     try:
         # Try to load from database first
         with db_manager.session_scope() as session:
-            instruments = session.query(Instrument.ticker).all()
+            instruments = session.query(Instrument.ticker).filter(
+                Instrument.asset_class == "STOCK"
+            ).all()
             if instruments:
                 symbols = sorted([row[0].upper() for row in instruments])
                 logger.info(f"Loaded {len(symbols)} symbols from database")
@@ -134,6 +141,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Error during bootstrap check: {e}")
         sys.exit(1)
+
+    try:
+        non_stock_result = bootstrap_non_stock_instruments()
+        if non_stock_result["errors"]:
+            logger.warning("Non-stock bootstrap errors: %s", non_stock_result["errors"])
+    except Exception as e:
+        logger.error(f"Error during non-stock bootstrap: {e}")
+        sys.exit(1)
     
     # Load symbols from database (assume instruments table now has data)
     logger.info("Loading validated symbols from database")
@@ -159,7 +174,13 @@ async def lifespan(app: FastAPI):
     
     # Initialize and start scheduler with all symbols
     logger.info("Initializing scheduler with all jobs")
-    scheduler_manager = initialize_scheduler(price_service, bars_service, all_symbols)
+    scheduler_manager = initialize_scheduler(
+        price_service,
+        bars_service,
+        all_symbols,
+        ForexService(),
+        settings.crypto_symbols_list,
+    )
     
     if not scheduler_manager.start():
         logger.error("Failed to start scheduler - market data polling will not occur")
