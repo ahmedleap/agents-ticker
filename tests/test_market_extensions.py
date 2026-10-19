@@ -72,18 +72,25 @@ def test_forex_historical_rates_become_synthetic_daily_bars():
     with patch("app.services.forex_service.requests.get") as get:
         response = MagicMock()
         response.json.return_value = [
-            {"base": "CAD", "quote": "USD", "rate": 1.25, "date": "2026-01-02"}
+            {"base": "CAD", "quote": "USD", "rate": 1.25, "date": "2026-01-02"},
+            {"base": "CAD", "quote": "USD", "rate": 1.25, "date": "2026-01-03"},
         ]
         get.return_value = response
 
         bars = service.get_historical_bars("CADUSD", "2026-01-01", "2026-01-03")
 
+    assert len(bars) == 1
     assert bars[0]["o"] == Decimal("1.25")
     assert bars[0]["h"] == bars[0]["l"] == bars[0]["c"] == Decimal("1.25")
     assert bars[0]["v"] == 0
     get.assert_called_once_with(
         "https://example.test/rates",
-        params={"base": "CAD", "quotes": "USD", "date": "2026-01-01..2026-01-03"},
+        params={
+            "base": "CAD",
+            "quotes": "USD",
+            "from": "2026-01-01",
+            "to": "2026-01-03",
+        },
         timeout=30,
     )
 

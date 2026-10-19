@@ -119,7 +119,8 @@ class ForexService:
                 params={
                     "base": base,
                     "quotes": quote,
-                    "date": f"{start_date}..{end_date}",
+                    "from": start_date,
+                    "to": end_date,
                 },
                 timeout=self.timeout,
             )
@@ -143,6 +144,8 @@ class ForexService:
                     datetime.min.time(),
                     tzinfo=timezone.utc,
                 )
+                if timestamp.weekday() >= 5:
+                    continue
                 bars.append({
                     "t": timestamp.isoformat(),
                     "o": rate,

@@ -226,6 +226,11 @@ def main():
             logger.error(f"Errors: {result['errors']}")
             return 1
 
+        non_stock_result = bootstrap_non_stock_instruments()
+        if non_stock_result["errors"]:
+            logger.error(f"Non-stock bootstrap errors: {non_stock_result['errors']}")
+            return 1
+
         logger.info("Bootstrap completed successfully!")
         return 0
 
