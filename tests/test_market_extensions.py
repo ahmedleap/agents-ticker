@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from app.services.alpaca_service import AlpacaService
 from app.services.bars_service import BarsService
+from app.bootstrap_instruments import load_industry_mapping
 from app.services.forex_service import ForexService
 from app.services.price_service import PriceService
 from app.services.scheduler import SchedulerManager
@@ -120,6 +121,15 @@ def test_asset_class_is_used_for_new_instruments():
 
     assert instrument.asset_class == "CRYPTO"
     assert instrument.ticker == "BTC"
+
+
+def test_sp500_industry_mapping_covers_repository_universe():
+    mapping = load_industry_mapping()
+
+    assert len(mapping) == 469
+    assert mapping["AAPL"] == "Technology Hardware, Storage & Peripherals"
+    assert mapping["BRK.B"] == "Multi-Sector Holdings"
+    assert mapping["DOW"] == "Commodity Chemicals"
 
 
 def test_scheduler_offsets_are_wall_clock_aligned():

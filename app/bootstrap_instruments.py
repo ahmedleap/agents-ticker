@@ -6,6 +6,7 @@ Usage:
     python -m app.bootstrap_instruments
 """
 
+import csv
 import logging
 import sys
 from pathlib import Path
@@ -21,6 +22,21 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+
+def load_industry_mapping() -> dict[str, str]:
+    """Load the checked-in S&P 500 ticker-to-GICS sub-industry mapping."""
+    mapping_path = Path(__file__).parent / "data" / "sp500_industries.csv"
+    try:
+        with mapping_path.open(newline="", encoding="utf-8") as handle:
+            return {
+                row["ticker"].strip().upper(): row["industry"].strip()
+                for row in csv.DictReader(handle)
+                if row.get("ticker") and row.get("industry")
+            }
+    except FileNotFoundError:
+        logger.warning("Industry mapping file not found: %s", mapping_path)
+        return {}
 
 
 def load_symbols_from_file(filepath: str) -> list:
@@ -87,6 +103,7 @@ def bootstrap_instruments(symbols: list) -> dict:
     logger.info(f"Bootstrapping {len(symbols)} instruments")
 
     alpaca = AlpacaService()
+    industry_mapping = load_industry_mapping()
     valid_symbols = []
 
     # Validate symbols by attempting a quote fetch
@@ -112,6 +129,9 @@ def bootstrap_instruments(symbols: list) -> dict:
                 # Check if already exists
                 existing = session.query(Instrument).filter_by(ticker=symbol).first()
                 if existing:
+                    industry = industry_mapping.get(symbol)
+                    if existing.asset_class == "STOCK" and industry:
+                        existing.industry = industry
                     logger.debug(f"Instrument already exists: {symbol}")
                     result["already_exist"] += 1
                     continue
@@ -121,6 +141,7 @@ def bootstrap_instruments(symbols: list) -> dict:
                     ticker=symbol,
                     name=symbol,  # Can be enhanced later with company name
                     asset_class="STOCK",
+                    industry=industry_mapping.get(symbol),
                 )
                 session.add(instrument)
                 result["created"] += 1
@@ -154,12 +175,12 @@ def bootstrap_non_stock_instruments() -> dict:
         for base, quote in ForexService.directed_pairs(currencies)
     ]
     crypto_symbols = settings.crypto_symbols_list if settings.CRYPTO_ENABLED else []
-    instruments = [(symbol, "FOREX") for symbol in fx_symbols]
-    instruments.extend((symbol, "CRYPTO") for symbol in crypto_symbols)
+    instruments = [(symbol, "FOREX", "Foreign Exchange") for symbol in fx_symbols]
+    instruments.extend((symbol, "CRYPTO", "Cryptocurrency") for symbol in crypto_symbols)
     result = {"created": 0, "already_exist": 0, "errors": []}
 
     with db_manager.session_scope() as session:
-        for symbol, asset_class in instruments:
+        for symbol, asset_class, industry in instruments:
             try:
                 existing = session.query(Instrument).filter_by(ticker=symbol).first()
                 if existing:
@@ -168,6 +189,8 @@ def bootstrap_non_stock_instruments() -> dict:
                             f"{symbol}: existing asset class is {existing.asset_class}, expected {asset_class}"
                         )
                     else:
+                        if not existing.industry:
+                            existing.industry = industry
                         result["already_exist"] += 1
                     continue
                 session.add(
@@ -175,6 +198,7 @@ def bootstrap_non_stock_instruments() -> dict:
                         ticker=symbol,
                         name=symbol,
                         asset_class=asset_class,
+                        industry=industry,
                     )
                 )
                 result["created"] += 1
