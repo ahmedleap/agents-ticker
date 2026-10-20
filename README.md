@@ -1,5 +1,7 @@
 # Ticker Service
 
+**Version:** 0.4.4
+
 FastAPI service that collects current bid/ask prices and daily historical bars
 for stocks, foreign exchange, and cryptocurrency instruments. Current prices
 are stored on `instruments`; daily OHLCV history is stored on
@@ -21,11 +23,11 @@ runs. A failure in one provider does not stop the other jobs.
 
 ### Instruments
 
-- Stocks: 469 symbols from `overlap.txt`.
+- Stocks: 466 symbols from `overlap.txt`.
 - FX: all 20 directed pairs among `USD`, `CAD`, `EUR`, `JPY`, and `CNY`,
   using compact tickers such as `USDCAD` and `CADUSD`.
 - Crypto: configured base symbols such as `BTC`, `ETH`, `SOL`, `XRP`, `USDT`,
-  `USDC`, and `BNB`; Alpaca requests them as pairs such as `BTC/USD`.
+  `USDC`; Alpaca requests them as pairs such as `BTC/USD`.
 
 Frankfurter supplies reference rates rather than bid/ask quotes, so current FX
 `bid` and `ask` are equal. Reverse current rates are calculated by reciprocal.
@@ -72,7 +74,7 @@ FRANKFURTER_URL=https://api.frankfurter.dev/v2/rates
 FOREX_OFFSET_SECOND=3
 
 CRYPTO_ENABLED=true
-CRYPTO_SYMBOLS=BTC,ETH,SOL,XRP,USDT,USDC,BNB
+CRYPTO_SYMBOLS=BTC,ETH,SOL,XRP,USDT,USDC
 CRYPTO_OFFSET_SECOND=8
 ```
 
@@ -185,8 +187,8 @@ docker compose up -d ticker-service
 
 Alpaca rate limits can produce HTTP 429 failures during a 496-instrument cold
 start. Those failures are partial; already inserted bars remain in the
-database. BNB may also have no historical bars available through the selected
-Alpaca account/feed.
+database. The configured crypto universe excludes BNB because Alpaca did not
+provide usable historical bars for it during validation.
 
 ## Health Endpoints
 

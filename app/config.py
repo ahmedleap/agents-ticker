@@ -47,7 +47,7 @@ class Settings(BaseSettings):
 
     # Crypto Configuration
     CRYPTO_SYMBOLS: str = os.getenv(
-        "CRYPTO_SYMBOLS", "BTC,ETH,SOL,XRP,USDT,USDC,BNB"
+        "CRYPTO_SYMBOLS", "BTC,ETH,SOL,XRP,USDT,USDC"
     )
     CRYPTO_ENABLED: bool = os.getenv("CRYPTO_ENABLED", "true").lower() == "true"
     CRYPTO_OFFSET_SECOND: int = int(os.getenv("CRYPTO_OFFSET_SECOND", "8"))

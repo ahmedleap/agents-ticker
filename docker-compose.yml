@@ -3,7 +3,7 @@ version: '3.8'
 services:
   ticker-service:
     build: .
-    image: ticker-service:0.4.3
+    image: ticker-service:0.4.4
     container_name: ticker-service
     ports:
       - "8000:8000"
@@ -28,7 +28,7 @@ services:
       FOREX_OFFSET_SECOND: ${FOREX_OFFSET_SECOND:-3}
       FRANKFURTER_URL: ${FRANKFURTER_URL:-https://api.frankfurter.dev/v2/rates}
       CRYPTO_ENABLED: ${CRYPTO_ENABLED:-true}
-      CRYPTO_SYMBOLS: ${CRYPTO_SYMBOLS:-BTC,ETH,SOL,XRP,USDT,USDC,BNB}
+      CRYPTO_SYMBOLS: ${CRYPTO_SYMBOLS:-BTC,ETH,SOL,XRP,USDT,USDC}
       CRYPTO_OFFSET_SECOND: ${CRYPTO_OFFSET_SECOND:-8}
       ALPACA_CRYPTO_FEED: ${ALPACA_CRYPTO_FEED:-}
     
