@@ -12,6 +12,7 @@ from app.services.alpaca_service import AlpacaService
 from app.services.price_service import PriceService
 from app.services.bars_service import BarsService
 from app.services.forex_service import ForexService
+from app.services.market_movers_service import MarketMoversService
 from app.database import db_manager
 from app.models import Instrument
 
@@ -51,6 +52,7 @@ class SchedulerManager:
         forex_service: Optional[ForexService] = None,
         crypto_symbols: Optional[List[str]] = None,
         eod_symbols: Optional[List[str]] = None,
+        market_movers_service: Optional[MarketMoversService] = None,
     ):
         self.price_service = price_service
         self.bars_service = bars_service
@@ -58,6 +60,8 @@ class SchedulerManager:
         self.eod_symbols = all_symbols if eod_symbols is None else eod_symbols
         self.forex_service = forex_service or ForexService()
         self.crypto_symbols = crypto_symbols or settings.crypto_symbols_list
+        self.market_movers_service = market_movers_service
+        self.market_movers_job: Optional[Job] = None
         self.scheduler: Optional[BackgroundScheduler] = None
         self.poll_job: Optional[Job] = None
         self.forex_job: Optional[Job] = None
@@ -145,6 +149,17 @@ class SchedulerManager:
                     coalesce=True,
                 )
             
+            if self.market_movers_service is not None:
+                self.market_movers_job = self.scheduler.add_job(
+                    func=self._poll_market_movers,
+                    trigger=CronTrigger(second="0,10,20,30,40,50", timezone="America/New_York"),
+                    id="market_movers_poll_job",
+                    name="Market Movers: Alpaca Poll (10s, stock market hours)",
+                    replace_existing=True,
+                    max_instances=1,
+                    coalesce=True,
+                )
+
             self.scheduler.start()
             self.is_running = True
             
@@ -274,6 +289,15 @@ class SchedulerManager:
         except Exception as exc:
             logger.error("FX poll failed: %s", exc, exc_info=True)
 
+    def _poll_market_movers(self):
+        """Publish provider movers only during the existing stock-market window."""
+        if self.market_movers_service is None or not is_market_open():
+            return
+        try:
+            self.market_movers_service.refresh()
+        except Exception:
+            logger.exception("Market movers refresh failed; previous snapshot retained")
+
     def _poll_crypto(self):
         """Fetch and persist crypto quotes without stock-market gating."""
         try:
@@ -316,6 +340,10 @@ class SchedulerManager:
                 "name": self.crypto_job.name if self.crypto_job else None,
                 "next_run": self.crypto_job.next_run_time.isoformat() if self.crypto_job and self.crypto_job.next_run_time else None,
             },
+            "market_movers_job": {
+                "name": self.market_movers_job.name if self.market_movers_job else None,
+                "next_run": self.market_movers_job.next_run_time.isoformat() if self.market_movers_job and self.market_movers_job.next_run_time else None,
+            },
             "job_count": len(self.scheduler.get_jobs()) if self.scheduler else 0,
         }
 
@@ -331,6 +359,7 @@ def initialize_scheduler(
     forex_service: Optional[ForexService] = None,
     crypto_symbols: Optional[List[str]] = None,
     eod_symbols: Optional[List[str]] = None,
+    market_movers_service: Optional[MarketMoversService] = None,
 ) -> SchedulerManager:
     """Initialize and return the global scheduler manager."""
     global _scheduler_manager
@@ -341,6 +370,7 @@ def initialize_scheduler(
         forex_service,
         crypto_symbols,
         eod_symbols,
+        market_movers_service,
     )
     return _scheduler_manager
 

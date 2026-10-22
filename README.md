@@ -16,6 +16,7 @@ All schedules use wall-clock seconds in `America/New_York`.
 | Stock quotes | `:00, :10, :20, :30, :40, :50` | Alpaca stocks | Stock market hours, weekdays |
 | FX quotes | `:03, :13, :23, :33, :43, :53` | Frankfurter v2 | Configured currencies, independent of stock hours |
 | Crypto quotes | `:08, :18, :28, :38, :48, :58` | Alpaca crypto | Configured crypto pairs, independent of stock hours |
+| Market movers | `:00, :10, :20, :30, :40, :50` | Alpaca stock/crypto screeners | Database instruments, stock market hours only |
 | EOD bars | `16:15 ET`, Monday-Friday | Alpaca, Frankfurter | All instruments in the database |
 
 Each scheduled job is isolated with one active instance and coalesced missed
@@ -90,13 +91,119 @@ For a new database, apply the complete schema directly:
 psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -f schema.sql
 ```
 
-The schema defines `FOREX` and `CRYPTO` directly in the `asset_class` enum;
-there is no separate migration directory.
+The schema defines `FOREX` and `CRYPTO` directly in the `asset_class` enum.
+Numbered additive migrations are maintained in `migrations/` and applied manually.
 
 The `instruments` table keeps current prices and metadata. The
 `instrument_price_history` table has a unique `(instrument_id, timestamp)`
 constraint, so a cold start should normally be run against an empty history
 table.
+
+## Market Movers
+
+The ticker service is the only component calling Alpaca. It fetches
+`/v1beta1/screener/stocks/movers?top=50` and
+`/v1beta1/screener/crypto/movers?top=50` when matching instruments exist, filters
+to database `STOCK` and `CRYPTO` instruments, combines gainers and losers, and
+persists up to five ordered by absolute percentage change. Ties are ordered by
+ticker, then instrument ID. Crypto base tickers such as `BTC` match `BTC/USD`,
+not other quote currencies. No instruments are created by this job.
+
+Prices and signed percentages come from Alpaca; no opening-price fallback or
+financial change calculation is performed. Forex is excluded. Because these
+are filtered market-wide top-50 lists, fewer than five matches are possible,
+and the result is not guaranteed to be the true top five of the tracked universe.
+Stock and crypto changes retain Alpaca's respective daily reset semantics
+(market open for stocks and midnight for crypto). Screener prices can differ
+from the separately polled, possibly delayed bid/ask midpoint.
+
+### Apply The Migration
+
+Before starting the updated ticker service or calling the backend endpoint,
+open `migrations/003_add_market_movers.sql` in pgAdmin's Query Tool connected
+to the shared primary database and execute the entire script. It only creates
+`market_movers`; it does not alter instruments, price history, or asset classes.
+It can be rerun against the same table definition. No migration is executed by
+application startup. If using separate roles, the ticker role needs
+`SELECT`, `DELETE`, and `INSERT` on this table; the backend role needs `SELECT`.
+Both also need their existing instrument-read permissions.
+
+Deploy the ticker producer next, then the Java backend. Do not drop the table
+while either application uses it. To roll back, first revert/disable the consuming
+application code, then manually run `DROP TABLE IF EXISTS market_movers;` only
+if the cached snapshot is no longer needed.
+
+The producer replaces the entire latest-only table in one transaction. If a
+required stock/crypto request fails or a database write fails, the previous
+snapshot remains. A successful refresh with no matching valid instruments
+clears it. Run one ticker scheduler instance; multiple writers are not supported.
+
+This job uses the existing weekday 09:30-16:00 `America/New_York` guard,
+including for crypto. It freezes outside that window. The guard does not
+handle exchange holidays or early closes. Missed ticks are coalesced and do not
+overlap; a slow request can skip a tick. Provider updates are not guaranteed
+every ten seconds just because polling occurs at that interval.
+
+### Backend Contract And Curl
+
+For closed-market manual testing, seed five **synthetic** movers using existing
+stock/crypto instruments after applying the migration:
+
+```powershell
+.\.venv\Scripts\python.exe -m app.seed_market_movers
+```
+
+This only writes `market_movers`; it does not create instruments, change prices,
+or call Alpaca. Prices reuse stored positive midpoints, falling back to a demo
+price of 100 when absent; percentage changes are synthetic. The script refuses
+to overwrite an existing snapshot unless run with `--replace`. Do not use this
+data for trading. Live scheduled polling replaces it during market hours.
+
+Authenticated `GET http://localhost:8081/api/instruments/market-movers` reads
+only the shared database in persisted rank order. Each item contains exactly
+the three frontend fields: `ticker`, `price`, and `changePercent`. Percentages
+are percentage points: `-2.5` means a decline of 2.5 percent. Example:
+
+```json
+{
+  "marketMovers": [{"ticker": "BTC", "price": 65000.25, "changePercent": -2.5}],
+  "asOf": "2026-10-22T14:00:00Z",
+  "refreshedAt": "2026-10-22T14:00:05Z",
+  "isStale": false
+}
+```
+
+`asOf` is the oldest provider timestamp among selected items. `refreshedAt`
+is the successful publication time. `isStale` is true if either is more than
+60 seconds old. Closed-market snapshots remain available and become stale.
+Before any results, or after a successful zero-match refresh, return HTTP 200
+with `marketMovers: []`, null timestamps, and `isStale: true`. A database read
+failure returns 503; unauthenticated requests return 401.
+
+Start both services normally after applying the migration. Set `ACCESS_TOKEN`
+locally to your existing login access token; do not put it in source control.
+No Docker setup or additional database instance is needed for these checks.
+
+```powershell
+curl.exe -i --max-time 10 http://localhost:8081/actuator/health
+curl.exe -i --max-time 10 http://localhost:8081/api/instruments/market-movers
+curl.exe -i --max-time 10 http://localhost:8081/api/instruments/market-movers -H "Authorization: Bearer $env:ACCESS_TOKEN"
+```
+
+The second command should return 401. The authenticated call should return
+200 after schema setup, even if the list is still empty outside market hours.
+For manual frontend testing, consume this endpoint's `marketMovers` array.
+The legacy backend dashboard movers query is unchanged and is a separate source.
+
+In pgAdmin, verify publication and ordering with:
+
+```sql
+SELECT movers.rank, instruments.ticker, movers.price, movers.change_percent,
+       movers.source_market, movers.source_as_of, movers.refreshed_at, movers.snapshot_id
+FROM market_movers movers
+JOIN instruments USING (instrument_id)
+ORDER BY movers.rank;
+```
 
 ## Running Locally
 

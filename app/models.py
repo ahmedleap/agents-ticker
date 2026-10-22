@@ -1,11 +1,32 @@
 """SQLAlchemy database models for market data service."""
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, Numeric, FetchedValue, Integer, ForeignKey, Index
+from sqlalchemy import Column, String, DateTime, Numeric, FetchedValue, Integer, ForeignKey, Index, CheckConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import declarative_base, relationship
 import uuid as uuid_lib
 
 Base = declarative_base()
+
+
+class MarketMover(Base):
+    """Latest atomically published provider-calculated movers snapshot."""
+    __tablename__ = "market_movers"
+
+    rank = Column(Integer, primary_key=True, autoincrement=False)
+    instrument_id = Column(UUID(as_uuid=True), ForeignKey("instruments.instrument_id"), nullable=False, unique=True)
+    snapshot_id = Column(UUID(as_uuid=True), nullable=False)
+    price = Column(Numeric(28, 12), nullable=False)
+    change_percent = Column(Numeric(28, 12), nullable=False)
+    source_market = Column(String(6), nullable=False)
+    source_as_of = Column(DateTime(timezone=True), nullable=False)
+    refreshed_at = Column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("rank BETWEEN 1 AND 5", name="market_movers_rank_check"),
+        CheckConstraint("price > 0 AND price < 10000000000000000", name="market_movers_price_check"),
+        CheckConstraint("change_percent > -10000000000000000 AND change_percent < 10000000000000000", name="market_movers_change_check"),
+        CheckConstraint("source_market IN ('stocks', 'crypto')", name="market_movers_market_check"),
+    )
 
 
 class Instrument(Base):

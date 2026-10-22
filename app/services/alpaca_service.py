@@ -84,6 +84,16 @@ class AlpacaService:
             logger.error(f"Alpaca API request error: {e}")
             raise AlpacaMarketDataError(f"Alpaca API error: {e}") from e
 
+    def get_market_movers(self, market_type: str, top: int = 50) -> Dict[str, Any]:
+        """Fetch provider-calculated stock or crypto gainers and losers."""
+        if market_type not in {"stocks", "crypto"}:
+            raise ValueError("Movers market must be stocks or crypto")
+        if not 1 <= top <= 50:
+            raise ValueError("Movers top must be between 1 and 50")
+        return self._make_request(
+            f"/v1beta1/screener/{market_type}/movers", params={"top": top}
+        )
+
     def get_latest_quotes(self, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
         """
         Fetch latest quotes for multiple symbols.

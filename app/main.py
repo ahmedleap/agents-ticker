@@ -21,6 +21,7 @@ from app.bootstrap_instruments import (
     bootstrap_non_stock_instruments,
 )
 from app.services.forex_service import ForexService
+from app.services.market_movers_service import MarketMoversService
 
 # Configure logging
 logging.basicConfig(
@@ -187,6 +188,7 @@ async def lifespan(app: FastAPI):
         ForexService(),
         settings.crypto_symbols_list,
         eod_symbols,
+        market_movers_service=MarketMoversService(alpaca_service),
     )
     
     if not scheduler_manager.start():

@@ -98,6 +98,36 @@ class TestMarketOpen:
 class TestSchedulerManager:
     """Tests for SchedulerManager."""
 
+    def test_market_movers_job_configuration(self):
+        service = MagicMock()
+        manager = SchedulerManager(MagicMock(), MagicMock(), [], market_movers_service=service)
+        with patch("app.services.scheduler.BackgroundScheduler") as scheduler:
+            assert manager.start()
+        jobs = scheduler.return_value.add_job.call_args_list
+        job = next(call.kwargs for call in jobs if call.kwargs["id"] == "market_movers_poll_job")
+        assert str(job["trigger"]) == "cron[second='0,10,20,30,40,50']"
+        assert job["max_instances"] == 1
+        assert job["coalesce"] is True
+        assert manager.get_status()["market_movers_job"]["name"] is not None
+
+    @pytest.mark.parametrize("market_open", [True, False])
+    def test_market_movers_respects_hours(self, market_open):
+        service = MagicMock()
+        manager = SchedulerManager(MagicMock(), MagicMock(), [], market_movers_service=service)
+        with patch("app.services.scheduler.is_market_open", return_value=market_open):
+            manager._poll_market_movers()
+        assert service.refresh.call_count == int(market_open)
+
+    def test_market_movers_failure_does_not_stop_scheduler(self):
+        service = MagicMock()
+        service.refresh.side_effect = RuntimeError("provider unavailable")
+        manager = SchedulerManager(MagicMock(), MagicMock(), [], market_movers_service=service)
+        with patch("app.services.scheduler.is_market_open", return_value=True):
+            manager._poll_market_movers()
+            service.refresh.side_effect = None
+            manager._poll_market_movers()
+        assert service.refresh.call_count == 2
+
     @pytest.fixture
     def mock_price_service(self):
         """Create mock price service."""

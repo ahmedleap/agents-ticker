@@ -36,6 +36,26 @@
 
 ## Data Flow
 
+### Market Movers: Provider To Shared Database
+1. An independent ten-second scheduler job calls `MarketMoversService.refresh()`
+  only within the existing weekday 09:30-16:00 ET window.
+2. `AlpacaService.get_market_movers()` fetches stock and crypto gainers/losers,
+  up to 50 per direction for each market represented in the database.
+3. The service filters to existing instruments, maps crypto USD pairs, validates
+  prices/timestamps, and selects up to five by absolute provider percentage change.
+4. `MarketMover` rows replace the prior snapshot in one transaction. A failed
+  required provider request or write preserves the entire previous snapshot.
+5. Java MyBatis reads `market_movers` joined to `instruments` in rank order.
+  Authenticated `GET /api/instruments/market-movers` exposes ticker, price,
+  signed changePercent, UTC timestamps, and freshness. Java never calls Alpaca
+  or recalculates percentage changes for this endpoint.
+
+Apply `migrations/003_add_market_movers.sql` manually to the shared PostgreSQL
+database before deploying. This is a latest-only snapshot, not price history.
+The scope excludes forex and frontend changes. Filtering provider top-50 lists
+cannot guarantee five tracked matches or an exhaustive tracked-universe ranking.
+Existing quote/bar jobs and the legacy Java dashboard query remain unchanged.
+
 ### Job 1: Real-Time Quote Polling (Every 10 seconds, market hours)
 1. `Scheduler` triggers `_poll_market_data_threaded()`
 2. `PriceService.fetch_and_persist_prices()` calls Alpaca API
